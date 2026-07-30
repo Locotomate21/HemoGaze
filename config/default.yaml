@@ -1,0 +1,27 @@
+data_dir: data/cp-anemic
+metadata_csv: data/cp-anemic/metadata.csv
+image_size: 224
+
+seed: 42
+val_frac: 0.15
+test_frac: 0.15
+
+backbone: convnext_tiny      # try efficientnet_b0 too; expect a near-tie at this scale
+pretrained: true
+dropout: 0.3
+
+epochs: 30
+batch_size: 16
+lr: 0.0001
+weight_decay: 0.01
+early_stop_patience: 6
+warmup_epochs: 2             # head-only epochs before the backbone unfreezes
+num_workers: 0               # raise on Linux; 0 is the safe default on Windows
+device: auto
+
+spec_target: 0.90
+n_calib_bins: 10
+
+out_dir: reports/runs
+run_name: baseline
+baseline_dir: reports/baselines

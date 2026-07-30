@@ -1,0 +1,30 @@
+# Config for the SYNTHETIC stand-in dataset (scripts/make_synthetic_data.py).
+# Its only purpose is to exercise the pipeline end to end on CPU: smaller
+# images, fewer epochs. Nothing produced with this config is a result.
+data_dir: data/synthetic
+metadata_csv: data/synthetic/metadata.csv
+image_size: 96
+
+seed: 42
+val_frac: 0.15
+test_frac: 0.15
+
+backbone: efficientnet_b0    # lean enough to train on CPU for a smoke run
+pretrained: true
+dropout: 0.3
+
+epochs: 3
+batch_size: 32
+lr: 0.0003
+weight_decay: 0.01
+early_stop_patience: 2
+warmup_epochs: 1
+num_workers: 0
+device: auto
+
+spec_target: 0.90
+n_calib_bins: 10
+
+out_dir: reports/runs_synthetic
+run_name: synthetic
+baseline_dir: reports/baselines_synthetic

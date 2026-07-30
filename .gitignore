@@ -1,0 +1,20 @@
+# never commit patient data
+data/cp-anemic/
+data/synthetic/
+data/**/*.jpg
+data/**/*.png
+data/**/*.csv
+
+# runs & artifacts
+reports/
+*.npz
+*.pt
+*.pth
+*.ckpt
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ipynb_checkpoints/
