@@ -203,9 +203,27 @@ def test_generalisation_gap_reports_gap_and_skips_unevaluable_sites():
                                     np.array([0.4, 0.5, 0.6, 0.55]),
                                     spec_target=0.5)
     dead = M.classification_report(np.zeros(5, dtype=int), np.linspace(0, 1, 5))
-    gap = M.generalisation_gap(good, [weak, dead])
+    gap = M.generalisation_gap(good, [weak, dead], min_site_n=0)
     assert gap["n_sites_evaluated"] == 1 and gap["n_sites_skipped"] == 1
     assert gap["auroc_gap"] == pytest.approx(good.auroc - weak.auroc)
+
+
+def test_generalisation_gap_excludes_tiny_sites_from_the_average():
+    """A fold of 8 images cannot measure generalisation, and averaging it as an
+    equal of a 134-image fold flatters the cross-site number."""
+    strong = M.classification_report(np.tile([0, 1], 50),
+                                     np.tile([0.2, 0.8], 50), spec_target=0.5)
+    weak_big = M.classification_report(np.tile([0, 1], 50),
+                                       np.r_[np.linspace(0.3, 0.7, 100)],
+                                       spec_target=0.5)
+    tiny_perfect = M.classification_report(np.array([0, 1, 1, 1]),
+                                           np.array([0.1, 0.8, 0.9, 0.95]),
+                                           spec_target=0.5)
+    gap = M.generalisation_gap(strong, [weak_big, tiny_perfect], min_site_n=30)
+    assert gap["n_sites_evaluated"] == 1
+    assert gap["n_sites_too_small"] == 1
+    # the tiny fold's perfect score must not enter the mean
+    assert gap["site_out_auroc_mean"] == pytest.approx(weak_big.auroc)
 
 
 def test_generalisation_gap_refuses_to_flatter_a_chance_level_model():
@@ -215,7 +233,7 @@ def test_generalisation_gap_refuses_to_flatter_a_chance_level_model():
     y = np.tile([0, 1], 60)
     chance = M.classification_report(y, rng.random(120), spec_target=0.5)
     other = M.classification_report(y, rng.random(120), spec_target=0.5)
-    gap = M.generalisation_gap(chance, [other])
+    gap = M.generalisation_gap(chance, [other], min_site_n=0)
     assert "NOT INTERPRETABLE" in gap["note"]
 
 
@@ -224,7 +242,7 @@ def test_generalisation_gap_with_no_evaluable_site_says_so():
                                    np.array([0.1, 0.2, 0.8, 0.9]),
                                    spec_target=0.5)
     dead = M.classification_report(np.ones(5, dtype=int), np.linspace(0, 1, 5))
-    gap = M.generalisation_gap(good, [dead])
+    gap = M.generalisation_gap(good, [dead], min_site_n=0)
     assert np.isnan(gap["auroc_gap"])
     assert "unsupported" in gap["note"]
 

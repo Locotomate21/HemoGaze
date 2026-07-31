@@ -23,6 +23,11 @@ RED_FLAG_AUROC = 0.99
 # (notably the generalisation gap) stop meaning anything.
 NEAR_CHANCE_AUROC = 0.60
 
+# Leave-one-site-out folds smaller than this are reported but kept out of the
+# cross-site average: on a handful of images AUROC is dominated by which pair
+# happened to swap, not by the model.
+MIN_SITE_N = 30
+
 
 @dataclass
 class ClassificationReport:
@@ -160,16 +165,30 @@ def classification_report(y_true, y_score, spec_target: float = 0.90,
 # ---- The headline number: optimistic split vs unseen site -------------------
 
 def generalisation_gap(patient_level: ClassificationReport,
-                       site_out: list[ClassificationReport]) -> dict:
+                       site_out: list[ClassificationReport],
+                       min_site_n: int = MIN_SITE_N) -> dict:
     """Quantify the finding this whole repo exists to measure.
 
-    Sites whose test set is single-class are excluded from the average (they are
-    not evaluable) but counted, because "how many sites were unusable" is part
-    of the honest answer. A large positive gap means the patient-level number
-    was measuring the facility as much as the child.
+    Two kinds of site are excluded from the average but still counted, because
+    "how many sites were unusable" is part of the honest answer:
+
+    * **single-class** sites, where ranking metrics are undefined;
+    * **tiny** sites (n < ``min_site_n``). On CP-AnemiC two facilities
+      contribute 8 and 15 images and score AUROC 0.86 and 1.00 — on 8 images a
+      single swapped pair moves AUROC by ~0.1, so those folds are noise. Letting
+      them into an unweighted mean pulled the cross-site average up by 0.07 and
+      made the generalisation gap look like +0.01 when the evaluable sites say
+      +0.08. Averaging them as equals is how a model gets credit for a fold that
+      could not have measured anything.
+
+    A large positive gap means the patient-level number was measuring the
+    facility as much as the child.
     """
-    evaluable = [r for r in site_out if np.isfinite(r.auroc)]
-    n_skipped = len(site_out) - len(evaluable)
+    usable = [r for r in site_out if np.isfinite(r.auroc)]
+    n_single_class = len(site_out) - len(usable)
+    evaluable = [r for r in usable if r.n >= min_site_n]
+    n_too_small = len(usable) - len(evaluable)
+    n_skipped = n_single_class + n_too_small
     if not evaluable:
         return {"patient_level_auroc": patient_level.auroc,
                 "site_out_auroc_mean": float("nan"),
@@ -178,6 +197,8 @@ def generalisation_gap(patient_level: ClassificationReport,
                 "site_out_auprc_mean": float("nan"),
                 "auprc_gap": float("nan"),
                 "n_sites_evaluated": 0, "n_sites_skipped": n_skipped,
+                "n_sites_single_class": n_single_class,
+                "n_sites_too_small": n_too_small, "min_site_n": min_site_n,
                 "note": "No site was evaluable; cross-site claims are unsupported."}
     auroc_mean = float(np.mean([r.auroc for r in evaluable]))
     auprc_mean = float(np.mean([r.auprc for r in evaluable]))
@@ -203,6 +224,9 @@ def generalisation_gap(patient_level: ClassificationReport,
         "auprc_gap": float(patient_level.auprc - auprc_mean),
         "n_sites_evaluated": len(evaluable),
         "n_sites_skipped": n_skipped,
+        "n_sites_single_class": n_single_class,
+        "n_sites_too_small": n_too_small,
+        "min_site_n": min_site_n,
         "note": note,
     }
 

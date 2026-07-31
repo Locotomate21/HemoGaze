@@ -33,6 +33,24 @@ def rgb_to_hsv_np(img: np.ndarray) -> np.ndarray:
     return np.stack([h, s, v], axis=-1)
 
 
+def roi_mask(img: np.ndarray, black_threshold: int = 20) -> np.ndarray:
+    """Boolean ROI mask that drops a segmented image's black background.
+
+    CP-AnemiC ships each conjunctiva already cut out and pasted on pure black,
+    and the background is 55-87% of the frame depending on how the strip was
+    traced. Averaging over the whole image therefore measures *how much black
+    the crop happens to contain* far more than it measures pallor: on real
+    images `r_mean` moves from ~197 inside the ROI to ~70 over the full frame.
+    Worse, that background fraction varies by 32 percentage points between
+    images, so it would act as a strong spurious feature correlated with
+    whoever traced the outline.
+
+    On an unsegmented photo almost nothing is pure black, so this returns
+    approximately all-True and is a no-op -- safe to apply unconditionally.
+    """
+    return img.max(axis=-1) > black_threshold
+
+
 def color_features(img: np.ndarray, mask: np.ndarray | None = None) -> dict:
     """Extract pallor-relevant colour statistics over the ROI.
 

@@ -13,6 +13,7 @@ class Config:
     data_dir: str = "data/cp-anemic"
     metadata_csv: str = "data/cp-anemic/metadata.csv"
     image_size: int = 224
+    roi_black_threshold: int = 20   # pixels dimmer than this are background
 
     # split
     seed: int = 42

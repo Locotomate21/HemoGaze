@@ -35,7 +35,7 @@ from hemogaze import baselines as B
 from hemogaze import metrics as M
 from hemogaze import splits as S
 from hemogaze.config import Config, load_config
-from hemogaze.features import FEATURE_ORDER, color_features, features_to_vector
+from hemogaze.features import FEATURE_ORDER, color_features, roi_mask
 
 
 def load_metadata(cfg: Config) -> pd.DataFrame:
@@ -81,18 +81,27 @@ def build_feature_matrix(df: pd.DataFrame, cfg: Config, cache: Path) -> pd.DataF
     from PIL import Image
 
     print(f"extracting colour features from {len(df)} images ...")
-    # KNOWN LIMITATION: no ROI mask is passed, so the statistics cover the whole
-    # frame. That is correct only if the images are already cropped to the
-    # conjunctiva. If they are not, skin, iris and background are diluting the
-    # pallor signal and inflating the site/camera signal -- check this against
-    # the actual images before trusting the colour baseline, and add an ROI step
-    # if needed.
-    rows = []
+    # Statistics are taken over the ROI only. CP-AnemiC images are pre-segmented
+    # conjunctiva strips on black, where the background is 55-87% of the frame
+    # and varies 32 points between images -- unmasked, the features would encode
+    # the crop outline instead of the pallor. On an unsegmented photo the mask
+    # is ~all-True, so this stays correct either way.
+    rows, bg_fracs = [], []
     for image_id in df["image_id"]:
         with Image.open(Path(cfg.data_dir) / image_id) as im:
             img = np.asarray(im.convert("RGB"))
-        rows.append({"image_id": image_id, **color_features(img)})
+        mask = roi_mask(img, cfg.roi_black_threshold)
+        bg_fracs.append(1.0 - mask.mean())
+        rows.append({"image_id": image_id, **color_features(img, mask)})
     feats = pd.DataFrame(rows)
+
+    bg = np.asarray(bg_fracs)
+    print(f"ROI masking: background is {bg.min():.0%}-{bg.max():.0%} of the "
+          f"frame (median {np.median(bg):.0%}) and was excluded")
+    if bg.max() < 0.02:
+        print("  -> effectively no background found; images look unsegmented, "
+              "so the whole frame is being used. Check that they are cropped "
+              "to the conjunctiva.")
     cache.parent.mkdir(parents=True, exist_ok=True)
     feats.to_csv(cache, index=False)
     print(f"colour features: cached -> {cache}")
@@ -205,8 +214,9 @@ def main() -> None:
     print(f"    patient-level AUROC     {gap['patient_level_auroc']:.3f}")
     print(f"    leave-one-site-out mean {gap['site_out_auroc_mean']:.3f} "
           f"(worst site {gap.get('site_out_auroc_min', float('nan')):.3f}, "
-          f"{gap['n_sites_evaluated']} sites evaluated, "
-          f"{gap['n_sites_skipped']} skipped as single-class)")
+          f"{gap['n_sites_evaluated']} sites evaluated; "
+          f"{gap['n_sites_too_small']} excluded as smaller than "
+          f"n={gap['min_site_n']}, {gap['n_sites_single_class']} as single-class)")
     print(f"    AUROC gap               {gap['auroc_gap']:+.3f}   <-- the finding")
     print(f"    AUPRC gap               {gap['auprc_gap']:+.3f}")
     print(f"    {gap['note']}")
