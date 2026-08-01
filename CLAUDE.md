@@ -41,10 +41,13 @@ metrics, cross-site validation, and no overselling.
   `baselines`, `dataset`, `model`, `config`). Everything except `dataset` and
   `model` has **no torch dependency** and is covered by `tests/test_smoke.py`;
   those two are the torch boundary and are never imported by `__init__`.
-- `scripts/` — `00_eda_baseline.py` → `02_train.py` → `03_evaluate.py`, in
-  order. `make_synthetic_data.py` is unnumbered because it is plumbing, not
-  pipeline: it fabricates a stand-in dataset so the whole chain can be run
-  without patient images.
+- `scripts/` — `01_prepare_metadata.py` → `00_eda_baseline.py` → `02_train.py`
+  → `03_evaluate.py`. Step 01 is the CP-AnemiC adapter (xlsx + `Anemic/` +
+  `Non-anemic/` → the four required columns) and only needs running once, which
+  is why step 00 keeps the lower number: it is the one you re-read constantly.
+  `make_synthetic_data.py` is unnumbered because it is plumbing, not pipeline:
+  it fabricates a stand-in dataset so the whole chain can be run without
+  patient images.
 - `config/default.yaml` — all hyperparameters. `config/synthetic.yaml` is the
   CPU smoke-run counterpart.
 - `reports/baselines*/` — step-0 output; `02_train.py` **refuses to run**
@@ -62,6 +65,23 @@ metrics, cross-site validation, and no overselling.
 - `classification_report` returns NaN plus an explanatory `note` for
   single-class evaluation sets instead of raising — leave-one-site-out will
   hand you those, and "not evaluable" is itself a finding to report.
+
+## What CP-AnemiC actually turned out to be (verified, not assumed)
+
+- **710 images, 710 rows, ten hospitals.** Labels are perfectly consistent with
+  Hb < 11 g/dL; the `Anemic/` `Non-anemic/` folders agree on all 710.
+- **The images are pre-segmented conjunctiva strips on black.** Background is
+  52–92% of the frame and varies 40 points between images, so colour features
+  **must** be taken over `roi_mask(img)`. Unmasked they encode the crop outline,
+  not the pallor.
+- **There is no patient identifier.** `patient_id = image_id` assumes one image
+  per child (see `data/cp-anemic/PREPARED.json`). If the source study shot both
+  eyes, the patient-level split is leaky and only cross-site results stand.
+  Verify against the publication before quoting a patient-level number.
+- **Two hospitals contribute 8 and 15 images.** They are reported but excluded
+  from cross-site averages (`MIN_SITE_N`); including them moved the gap from
+  +0.075 to +0.008 and would have been the difference between an honest finding
+  and a flattering one.
 
 ## Subagents (delegate deliberately)
 

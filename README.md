@@ -12,10 +12,10 @@ seen?
 > Screening signal, **not** a diagnosis. Reference standard is lab hemoglobin.
 > Dataset is young children in Ghana across ten sites; claims stop there.
 
-**Status: pipeline complete and verified end to end; no real-data results yet.**
-The CP-AnemiC images are not in this repo and have not been run through it. Every
-number you can currently produce comes from a deliberately fabricated stand-in
-dataset and is stamped `SYNTHETIC`. See [Results](#results).
+**Status: baselines run on real CP-AnemiC data; CNN not yet trained.**
+The colour baseline and the confounder audit have been run on all 710 images
+across ten Ghanaian hospitals. The deep model has not. See [Results](#results).
+The images themselves are never committed.
 
 ## Why this repo looks the way it does
 
@@ -27,8 +27,9 @@ architecture of the project is built around that question:
   and a **leave-one-site-out** sweep over every site (honest). The gap between
   them is the headline result.
 - **A real baseline first:** majority-class, then an eleven-feature colour
-  logistic regression. Pallor is a colour change, so if a heavy CNN cannot
-  clearly beat colour, that is a finding — not something to hide.
+  logistic regression, taken over an ROI mask rather than the whole frame.
+  Pallor is a colour change, so if a heavy CNN cannot clearly beat colour, that
+  is a finding — not something to hide.
 - **A confounder probe:** `site_prior` predicts a child's label from the
   collection site alone, using no pixels at all. If it scores well on the
   patient-level split, site identity itself predicts anemia and every
@@ -50,7 +51,7 @@ Two of those rules are enforced by code rather than by good intentions:
 
 ```bash
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt        # torch/timm only needed from step 3
+pip install -r requirements.txt        # torch/timm only needed from step 5
 
 # 1. verify the honest core with no data and no GPU
 pytest -q
@@ -59,17 +60,18 @@ pytest -q
 python scripts/make_synthetic_data.py --out data/synthetic
 #    then use config/synthetic.yaml in place of config/default.yaml below
 
-# 3. get the real data  ->  see data/README.md  (CP-AnemiC + a metadata.csv)
+# 3. get the real data (see data/README.md), then adapt it to the schema
+python scripts/01_prepare_metadata.py --src "path/to/CP-AnemiC dataset"
 
 # 4. EDA, confounder audit, and baselines (run and read BEFORE any neural net)
-python scripts/00_eda_baseline.py --config config/default.yaml
+python scripts/00_eda_baseline.py --config config/cpanemic.yaml
 
 # 5. train
-python scripts/02_train.py --config config/default.yaml                # patient-level
-python scripts/02_train.py --config config/default.yaml --all-sites    # cross-site sweep
+python scripts/02_train.py --config config/cpanemic.yaml               # patient-level
+python scripts/02_train.py --config config/cpanemic.yaml --all-sites   # cross-site sweep
 
 # 6. figures per run, then the comparison table
-python scripts/03_evaluate.py --run reports/runs/baseline_patient_level
+python scripts/03_evaluate.py --run reports/runs/convnext128_patient_level
 python scripts/03_evaluate.py --compare        # -> reports/summary.md
 ```
 
@@ -93,25 +95,37 @@ project and it is available on day one.
 
 ## Results
 
-There are none yet on real data, and this section will not be filled in with
-anything else.
+Real CP-AnemiC: 710 images, ten hospitals, 59.7% anemic. Colour baseline only —
+**no CNN has been trained yet**, so nothing below is a deep-learning result.
 
-The pipeline has been verified end to end on the synthetic stand-in
-(720 images, 360 patients, 10 sites, two fabricated sites near-single-class).
-That exercise confirms the machinery behaves as designed:
+| | AUROC | AUPRC | sens @ 90% spec | ECE |
+|---|---|---|---|---|
+| majority class (the floor) | 0.500 | 0.604 | 0.000 | — |
+| colour logistic, patient-level | **0.668** | 0.729 | 0.219 | 0.110 |
+| colour logistic, unseen hospital (8 sites) | **0.593** | — | — | — |
+| **generalisation gap** | **+0.075** | +0.042 | | |
+| `site_prior` probe, patient-level | 0.660 | 0.735 | 0.250 | 0.036 |
+| `site_prior` probe, unseen hospital | 0.500 | — | — | — |
 
-- the confounder audit flagged both one-sided sites;
-- the `site_prior` probe scored AUROC 0.69 on the patient-level split and
-  collapsed to 0.50 on every unseen site — the fabricated site confounder,
-  correctly detected and correctly shown not to transfer;
-- the colour baseline showed a positive patient-level → cross-site gap, with
-  AUPRC degrading further than AUROC on the imbalanced folds;
-- a deliberately under-trained CNN came out **below** the colour baseline, and
-  the script said so in those words.
+Three things worth stating plainly:
 
-Those are statements about the code. They are not findings about anemia, and
-the synthetic generator exists precisely so that nobody has to pretend
-otherwise while the real data is unavailable.
+**Knowing which hospital took the photo is almost as predictive as the photo.**
+The `site_prior` probe uses zero pixels and reaches 0.660 against the colour
+model's 0.668. On the optimistic split the image adds very little over the site
+confounder. The colour signal does transfer (0.593 on unseen hospitals) while
+site identity collapses to chance, so there is real pallor signal — it is just
+weak.
+
+**This is not yet a usable screening tool.** At 90% specificity the colour model
+catches 22% of anemic children. Four in five are missed.
+
+**Two hospitals contribute 8 and 15 images** and scored AUROC 0.857 and 1.000.
+Those folds cannot measure anything, and averaging them as equals of a
+134-image fold moved the reported gap from +0.075 to +0.008. They are reported
+but excluded from cross-site averages.
+
+The pipeline was verified end to end on a synthetic stand-in before the real
+data arrived; that exercise is a statement about the code, not about anemia.
 
 ## Case study (fill in as real results land)
 
@@ -145,11 +159,11 @@ in `.claude/agents/` and are meant to be delegated to:
 ```
 src/hemogaze/   splits · metrics · features · baselines · dataset · model · config
                 (only dataset + model import torch)
-scripts/        00_eda_baseline → 02_train → 03_evaluate
+scripts/        01_prepare_metadata → 00_eda_baseline → 02_train → 03_evaluate
                 make_synthetic_data.py  (plumbing, not pipeline)
-tests/          test_smoke.py  (30 tests: splits, leakage, metrics, baselines —
-                no data, no GPU)
-config/         default.yaml · synthetic.yaml
+tests/          test_smoke.py  (33 tests: splits, leakage, metrics, baselines,
+                ROI masking — no data, no GPU)
+config/         default.yaml · cpanemic.yaml · synthetic.yaml
 reports/        baselines/ · runs/ · summary.md   (git-ignored)
 .claude/agents/ six specialist subagents
 CLAUDE.md       the rigor doctrine

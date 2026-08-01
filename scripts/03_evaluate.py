@@ -239,19 +239,24 @@ def compare(runs_dir: Path, baseline_json: Path, out_md: Path) -> None:
               "error (lower is better).", "", rendered, ""]
 
     patient = [r for r in records if r["split_kind"] == "patient_level"]
-    site = [r for r in records if r["split_kind"] == "leave_one_site_out"
-            and np.isfinite(r["cnn"]["auroc"])]
+    # Pass every site fold through, including the unevaluable ones: the gap
+    # function is what decides which folds count, and it reports how many it
+    # had to drop. Filtering them out here would hide that from the summary.
+    site = [r for r in records if r["split_kind"] == "leave_one_site_out"]
     if patient and site:
         p = M.ClassificationReport(**patient[0]["cnn"])
         gap = M.generalisation_gap(p, [M.ClassificationReport(**r["cnn"])
                                        for r in site])
+        worst = gap.get("site_out_auroc_min", float("nan"))
         lines += ["## The headline: generalisation gap (CNN)", "",
                   f"- patient-level AUROC: **{gap['patient_level_auroc']:.3f}**",
                   f"- leave-one-site-out mean AUROC: "
                   f"**{gap['site_out_auroc_mean']:.3f}** "
-                  f"(worst site {gap['site_out_auroc_min']:.3f}, "
+                  f"(worst site {worst:.3f}; "
                   f"{gap['n_sites_evaluated']} sites evaluated, "
-                  f"{gap['n_sites_skipped']} skipped as single-class)",
+                  f"{gap['n_sites_too_small']} excluded as smaller than "
+                  f"n={gap['min_site_n']}, "
+                  f"{gap['n_sites_single_class']} as single-class)",
                   f"- **AUROC gap: {gap['auroc_gap']:+.3f}** — this, not the "
                   f"higher number, is the result.",
                   f"- AUPRC gap: {gap['auprc_gap']:+.3f}",

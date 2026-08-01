@@ -1,6 +1,7 @@
 data_dir: data/cp-anemic
 metadata_csv: data/cp-anemic/metadata.csv
 image_size: 224
+roi_black_threshold: 20      # pixels dimmer than this count as background, not ROI
 
 seed: 42
 val_frac: 0.15

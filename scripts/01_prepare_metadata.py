@@ -67,9 +67,6 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", required=True, help="unzipped CP-AnemiC folder")
     ap.add_argument("--out", default="data/cp-anemic")
-    ap.add_argument("--copy-images", action="store_true", default=True,
-                    help="copy images into --out (default); patient data stays "
-                         "git-ignored either way")
     args = ap.parse_args()
 
     src, out = Path(args.src), Path(args.out)

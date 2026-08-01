@@ -16,7 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from hemogaze import baselines as B
 from hemogaze import metrics as M
 from hemogaze import splits as S
-from hemogaze.features import FEATURE_ORDER, color_features, features_to_vector
+from hemogaze.features import (FEATURE_ORDER, color_features,
+                               features_to_vector, roi_mask)
 
 
 def _fake_meta(n_patients=60, sites=4, seed=0):
@@ -274,6 +275,27 @@ def test_color_features_detect_pallor_direction():
     pale[..., 0], pale[..., 1], pale[..., 2] = 150, 110, 110
     assert color_features(pale)["redness"] < color_features(red)["redness"]
     assert color_features(pale)["sat_mean"] < color_features(red)["sat_mean"]
+
+
+def test_roi_mask_drops_a_black_background():
+    """CP-AnemiC images are conjunctiva strips pasted on black, and the
+    background is most of the frame. Without this mask the colour features
+    would encode the crop outline instead of the pallor."""
+    img = np.zeros((20, 20, 3), dtype="uint8")
+    img[5:15, :, :] = [180, 95, 95]                  # the "conjunctiva" band
+    mask = roi_mask(img)
+    assert mask.sum() == 10 * 20
+    assert not mask[0, 0] and mask[10, 10]
+    # r_mean over the ROI is the true strip colour, not diluted by the black
+    assert color_features(img, mask)["r_mean"] == pytest.approx(180.0)
+    assert color_features(img)["r_mean"] == pytest.approx(90.0)   # halved
+
+
+def test_roi_mask_is_a_noop_on_an_unsegmented_photo():
+    """Applying it unconditionally must be safe: a normal photo has almost no
+    pure-black pixels, so nearly everything survives."""
+    img = (np.random.default_rng(0).integers(40, 255, (32, 32, 3))).astype("uint8")
+    assert roi_mask(img).mean() > 0.99
 
 
 def test_color_features_respect_the_roi_mask():
