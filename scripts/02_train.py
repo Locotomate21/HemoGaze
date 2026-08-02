@@ -107,7 +107,7 @@ def train_one(cfg: Config, df: pd.DataFrame, split: S.Split, baselines: dict,
         ds = make_dataset(df.loc[idx], cfg.data_dir, cfg.image_size, train,
                           crop_to_roi=cfg.crop_to_roi, strong_aug=cfg.strong_aug,
                           randomise_background=cfg.randomise_background,
-                          seed=cfg.seed)
+                          silhouette_only=cfg.silhouette_only, seed=cfg.seed)
         return DataLoader(ds, batch_size=cfg.batch_size, shuffle=train,
                           num_workers=cfg.num_workers)
 
@@ -197,6 +197,7 @@ def train_one(cfg: Config, df: pd.DataFrame, split: S.Split, baselines: dict,
         "crop_to_roi": cfg.crop_to_roi,
         "strong_aug": cfg.strong_aug,
         "randomise_background": cfg.randomise_background,
+        "silhouette_only": cfg.silhouette_only,
         "device": device,
         "split_kind": split.kind,
         "split_note": split.note,

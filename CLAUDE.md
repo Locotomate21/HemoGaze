@@ -74,10 +74,11 @@ metrics, cross-site validation, and no overselling.
   52–92% of the frame and varies 40 points between images, so colour features
   **must** be taken over `roi_mask(img)`. Unmasked they encode the crop outline,
   not the pallor.
-- **There is no patient identifier.** `patient_id = image_id` assumes one image
-  per child (see `data/cp-anemic/PREPARED.json`). If the source study shot both
-  eyes, the patient-level split is leaky and only cross-site results stand.
-  Verify against the publication before quoting a patient-level number.
+- **One image per child, verified against the publication.** There is no
+  patient identifier column, so `patient_id = image_id`; the paper states 710
+  individuals / 710 participants and heads its Table 2 "patient-level
+  characteristics", and the metadata reproduces its 306/404 sex split and mean
+  age to two decimals. The patient-level split carries no leakage on this axis.
 - **Two hospitals contribute 8 and 15 images.** They are reported but excluded
   from cross-site averages (`MIN_SITE_N`); including them moved the gap from
   +0.075 to +0.008 and would have been the difference between an honest finding

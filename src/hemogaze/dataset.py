@@ -111,6 +111,29 @@ def fill_background(img: Image.Image, train: bool,
     return Image.fromarray(arr)
 
 
+def to_silhouette(img: Image.Image, black_threshold: int = 20) -> Image.Image:
+    """Throw away every pixel value and keep only the shape of the ROI.
+
+    This is a **positive control**, not an ablation. Two attempts to remove the
+    segmentation shortcut and watch the model get worse both failed: cropping to
+    the ROI does nothing on a crescent, and repainting the background destroyed
+    training because the background is 72% of the frame. Worse, repainting
+    attacked the wrong variable -- the background is uniform black in all 710
+    images, so its colour cannot distinguish a hospital; only the traced outline
+    varies.
+
+    So instead of subtracting the cue, measure it on its own. A model trained on
+    white-on-black silhouettes has access to the hand-drawn shape and to nothing
+    else: no pallor, no colour, no texture. If it reaches the AUROC of the
+    full-image model, the shortcut hypothesis is demonstrated directly. If it
+    sits at chance, the hypothesis is dead and the Grad-CAM reading was
+    over-interpretation.
+    """
+    mask = roi_mask(np.asarray(img), black_threshold)
+    return Image.fromarray(np.repeat((mask * 255).astype(np.uint8)[:, :, None],
+                                     3, axis=2))
+
+
 class ConjunctivaDataset(Dataset):
     """Rows of an already-split metadata frame -> (image tensor, target).
 
@@ -122,7 +145,8 @@ class ConjunctivaDataset(Dataset):
     def __init__(self, df: pd.DataFrame, data_dir: str | Path, image_size: int,
                  train: bool, target_col: str = "label",
                  crop_to_roi: bool = False, strong_aug: bool = False,
-                 randomise_background: bool = False, seed: int = 42):
+                 randomise_background: bool = False,
+                 silhouette_only: bool = False, seed: int = 42):
         if target_col not in df.columns:
             raise ValueError(f"Metadata has no {target_col!r} column.")
         self.df = df.reset_index(drop=True)
@@ -130,6 +154,7 @@ class ConjunctivaDataset(Dataset):
         self.target_col = target_col
         self.crop_to_roi = crop_to_roi
         self.randomise_background = randomise_background
+        self.silhouette_only = silhouette_only
         self.train = train
         self.rng = np.random.default_rng(seed)
         self.tf = build_transforms(image_size, train, strong_aug)
@@ -145,7 +170,9 @@ class ConjunctivaDataset(Dataset):
         if self.crop_to_roi:
             top, left, bottom, right = roi_bbox(np.asarray(img))
             img = img.crop((left, top, right, bottom))
-        if self.randomise_background:
+        if self.silhouette_only:
+            img = to_silhouette(img)
+        elif self.randomise_background:
             img = fill_background(img, train=self.train, rng=self.rng)
         x = self.tf(img)
         y = torch.tensor(float(row[self.target_col]), dtype=torch.float32)
@@ -156,8 +183,9 @@ def make_dataset(df: pd.DataFrame, data_dir: str | Path, image_size: int,
                  train: bool, target_col: str = "label",
                  crop_to_roi: bool = False, strong_aug: bool = False,
                  randomise_background: bool = False,
+                 silhouette_only: bool = False,
                  seed: int = 42) -> ConjunctivaDataset:
     """Kept as a function so call sites read the same as before."""
     return ConjunctivaDataset(df, data_dir, image_size, train, target_col,
                               crop_to_roi, strong_aug, randomise_background,
-                              seed)
+                              silhouette_only, seed)

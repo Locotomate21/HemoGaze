@@ -34,7 +34,7 @@ The resulting `metadata.csv` has **at least** these columns:
    | column       | meaning                                   |
    |--------------|-------------------------------------------|
    | `image_id`   | filename relative to `data_dir`           |
-   | `patient_id` | one id per child — see the caveat below   |
+   | `patient_id` | one id per child (verified, see below)    |
    | `site`       | collection facility (the confounder axis) |
    | `label`      | 1 = anemic (Hb < 11), 0 = not             |
    | `hemoglobin` | g/dL (optional, enables the Hb-regression variant) |
@@ -43,12 +43,13 @@ The resulting `metadata.csv` has **at least** these columns:
 
 ### Two things the adapter cannot fix
 
-**There is no patient identifier.** The spreadsheet has one row per image and
-the filenames are a flat sequence, so `patient_id = image_id` — i.e. one image
-per child is *assumed*. If the source study photographed both eyes of ~355
-children, the patient-level split is leaky and only the leave-one-site-out
-results stand. The assumption is recorded in `data/cp-anemic/PREPARED.json`;
-verify it against the publication before quoting a patient-level number.
+**There is no patient identifier column**, so `patient_id = image_id`. That
+means one image per child, and the source paper confirms it: "CP-AnemiC,
+comprising 710 individuals", "Out of the 710 participants, 306 (43%) were female
+and 404 (57%) male", and a Table 2 headed "patient-level characteristics" giving
+710 total patients. The delivered metadata reproduces those counts exactly
+(306/404, mean age 31.59 vs 31.58). The patient-level split is therefore a real
+patient-level split, not an image-level one wearing the name.
 
 **The images are pre-segmented conjunctiva strips on black**, where the
 background is 52-92% of the frame and varies 40 points between images. Colour

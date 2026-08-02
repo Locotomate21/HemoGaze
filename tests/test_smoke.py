@@ -436,6 +436,21 @@ def test_background_fill_actually_varies_between_draws():
     assert not (one[0, 0] == two[0, 0]).all()
 
 
+@needs_torch
+def test_silhouette_keeps_shape_and_destroys_colour():
+    """The positive control must hand the model the outline and nothing else.
+    If any colour survived, a null result could not be trusted."""
+    from PIL import Image
+
+    from hemogaze.dataset import to_silhouette
+    a = np.zeros((20, 30, 3), dtype="uint8")
+    a[5:15, 5:25] = [180, 95, 95]
+    s = np.asarray(to_silhouette(Image.fromarray(a)))
+    assert set(np.unique(s)) <= {0, 255}                  # binary only
+    assert (s[..., 0] == 255).sum() == 10 * 20            # shape preserved
+    assert (s[..., 0] == s[..., 1]).all() and (s[..., 1] == s[..., 2]).all()
+
+
 if __name__ == "__main__":
     import subprocess
     subprocess.run([sys.executable, "-m", "pytest", "-q", __file__])

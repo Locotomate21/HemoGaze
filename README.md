@@ -12,11 +12,12 @@ seen?
 > Screening signal, **not** a diagnosis. Reference standard is lab hemoglobin.
 > Dataset is young children in Ghana across ten sites; claims stop there.
 
-**Status: full experiment run on real CP-AnemiC data.** Baselines, confounder
-audit, and eleven ConvNeXt-Tiny runs across all 710 images and ten Ghanaian
-hospitals. Headline: the CNN does not beat an eleven-feature colour model, and
-its per-hospital variance is 2.5× the baseline's. See [Results](#results). The
-images themselves are never committed.
+**Status: three experiments run on real CP-AnemiC data.** Baselines, confounder
+audit, 22 ConvNeXt-Tiny runs across all 710 images and ten Ghanaian hospitals,
+plus a positive control. Headline: the CNN does not beat an eleven-feature
+colour model in any configuration — and the shortcut explanation this project
+first offered for that was tested and **refuted by its own control**. See
+[Results](#results). The images themselves are never committed.
 
 ## Why this repo looks the way it does
 
@@ -127,10 +128,14 @@ hospitals:
 
 Same mean, **2.5× the spread**. The CNN scores 0.871 at one hospital and 0.399 —
 below chance — at another, falling under 0.5 in two of eight. Pallor is the same
-biology everywhere, so a model that learned it would perform similarly
-everywhere. That variance is the signature of a shortcut, and Grad-CAM
-(`reports/runs/*/gradcam.png`) shows the heat sitting on the black background
-and the crop silhouette rather than on the conjunctiva.
+biology everywhere, so a model that learned it would not swing like that.
+
+Grad-CAM (`reports/runs/*/gradcam.png`) showed the heat sitting on the black
+background rather than on the conjunctiva, which suggested the model was reading
+the hand-traced segmentation outline — a per-hospital fingerprint. **That
+hypothesis was tested directly and it is wrong**; see the silhouette control
+below. The variance is real, but the shortcut explanation for it did not
+survive contact with evidence.
 
 **Known asymmetry in experiment 1.** The colour baseline gets `roi_mask`, so it
 cannot see the segmentation outline; the CNN was fed the raw frame and can. The
@@ -174,9 +179,52 @@ survives it:
   only the five folds that trained properly, the spread falls from std 0.132 to
   0.087 — a real reduction, but half the apparent effect, and n=5 makes it soft.
 
-A diagnostic isolating the two interventions (background randomisation without
-the aggressive augmentation) is what would tell us whether the collapse is
-fixable and the experiment worth rerunning.
+### Experiment 3: the silhouette control, and a retracted hypothesis
+
+A diagnostic isolated the two interventions and found the collapse comes from
+`randomise_background`, not from the augmentation: with the aggressive
+augmentation switched off, predictions still span 0.0065.
+
+Understanding why exposed a design error. **The background is uniform black in
+all 710 images** — every background pixel measures 0–20 — so its colour cannot
+distinguish one hospital from another. Only the traced outline varies.
+Randomising the background colour therefore never touched the cue it was aimed
+at, while replacing 72% of every input with noise that changes each epoch. The
+intervention attacked the wrong variable. That is a reasoning error, not an
+implementation one.
+
+So the question was inverted: instead of subtracting the cue and watching the
+model get worse, measure the cue on its own. `silhouette_only` trains the same
+ConvNeXt-Tiny on **binary masks** — white where tissue is, black elsewhere, no
+colour, no texture, no pallor. Whatever a hand-traced outline can predict, this
+model gets to predict it.
+
+| patient-level | AUROC | AUPRC | sens @ 90% spec |
+|---|---|---|---|
+| full image | 0.627 | 0.691 | 0.062 |
+| background randomised + strong aug | 0.618 | 0.726 | 0.266 |
+| background randomised only | 0.603 | 0.713 | 0.141 |
+| **silhouette only (positive control)** | **0.530** | 0.645 | 0.125 |
+| colour logistic | **0.668** | 0.729 | 0.219 |
+
+**The silhouette alone is worthless: AUROC 0.530, bootstrap 95% CI
+[0.404, 0.640], which contains chance.** The class means differ by 0.0014.
+
+That refutes the shortcut hypothesis this project argued for two experiments
+running. The hand-traced outline does not predict anemia, so "the CNN learned
+the segmentation artefact" cannot explain either its weak performance or its
+per-hospital variance. The Grad-CAM reading was over-interpretation — saliency
+on a barely-better-than-chance model is not reliable evidence of what that model
+uses.
+
+The variance still needs an explanation, and the mundane one is now the leading
+candidate: 28M parameters fitted to ~500 images are unstable, and which hospital
+you hold out changes the draw.
+
+One thing the control does support: a model handed genuinely uninformative input
+collapses toward the base rate, exactly as the background-randomised runs did.
+That is the correct behaviour, and it retroactively explains those collapses as
+"no learnable signal survived the intervention" rather than an optimiser bug.
 
 **Two hospitals contribute 8 and 15 images** and are reported but excluded from
 cross-site averages. The colour baseline scored AUROC 1.000 on the 15-image one —
@@ -216,9 +264,10 @@ src/hemogaze/   splits · metrics · features · baselines · dataset · model �
                 (only dataset + model import torch)
 scripts/        01_prepare_metadata → 00_eda_baseline → 02_train → 03_evaluate
                 make_synthetic_data.py  (plumbing, not pipeline)
-tests/          test_smoke.py  (33 tests: splits, leakage, metrics, baselines,
-                ROI masking — no data, no GPU)
-config/         default.yaml · cpanemic.yaml · synthetic.yaml
+tests/          test_smoke.py  (40 tests: splits, leakage, metrics, baselines,
+                ROI masking, shortcut controls — no data, no GPU)
+config/         default.yaml · cpanemic.yaml · cpanemic_matched.yaml
+                cpanemic_bgonly.yaml · cpanemic_silhouette.yaml · synthetic.yaml
 reports/        baselines/ · runs/ · summary.md   (git-ignored)
 .claude/agents/ six specialist subagents
 CLAUDE.md       the rigor doctrine
@@ -226,5 +275,12 @@ CLAUDE.md       the rigor doctrine
 
 ## License / data
 
-Code: add your license. Data: not included and never committed — patient
-images are sensitive (see `.gitignore` and `data/README.md`).
+Code: MIT (see `LICENSE`). The dataset is **not** covered by it, is not included
+and is never committed — these are clinical photographs of children aged 6–59
+months. Get them from the original source and respect its terms:
+
+> Appiahene et al., "CP-AnemiC: A conjunctival pallor dataset and benchmark for
+> anemia detection in children", *Medicine in Novel Technology and Devices* 18
+> (2023) 100244.
+
+Nothing here is a medical device or a diagnosis.

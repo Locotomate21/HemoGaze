@@ -19,6 +19,7 @@ class Config:
     crop_to_roi: bool = False       # crop away the framing before the network sees it
     strong_aug: bool = False        # RandomResizedCrop so the silhouette stops being reliable
     randomise_background: bool = False   # redraw the segmentation background every epoch
+    silhouette_only: bool = False   # positive control: train on the ROI shape alone
 
     # split
     seed: int = 42
