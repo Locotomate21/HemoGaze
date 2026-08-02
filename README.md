@@ -230,18 +230,104 @@ That is the correct behaviour, and it retroactively explains those collapses as
 cross-site averages. The colour baseline scored AUROC 1.000 on the 15-image one —
 ranking two negatives — and the red-flag rule caught it automatically.
 
-## Case study (fill in as real results land)
+## Case study
 
-**Problem.** _One paragraph: the screening gap anemia detection has._
+### Problem
 
-**Decisions.** _Patient- and site-level splits; colour baseline; screening
-metrics + calibration. Why each._
+Anemia affects over a billion people and hits hardest where diagnosis is
+hardest: confirming it needs a blood draw, a lab, and a trained technician.
+Clinicians already read the palpebral conjunctiva by eye — it pales as
+hemoglobin falls — so a smartphone photo of it is an obvious candidate for
+triage in a clinic that has no analyser. The literature is full of papers
+reporting high accuracy on that task. The question this project asked was not
+"can we match them" but "would the number survive a hospital the model has never
+seen", because a screening tool that only works where it was trained is not a
+screening tool.
 
-**Result.** _Patient-level vs leave-one-site-out, side by side. Baseline vs
-CNN. Lead with the generalisation gap. Cite the split_hash._
+### Decisions
 
-**Limitations.** _Screening not diagnosis; one population; small data; what
-external data would be needed to claim more._
+**Baselines before the network, enforced in code.** Pallor is a colour change,
+so eleven colour statistics plus logistic regression is a serious competitor,
+not a straw man. `02_train.py` exits non-zero unless the baseline file exists,
+and prints the colour number beside every CNN number it produces. There is no
+code path that yields a standalone deep-learning result.
+
+**Two splits, always reported together.** Patient-level (optimistic) and
+leave-one-site-out over all ten hospitals (honest). `assert_no_leakage` runs
+inside both split functions, so a leaky split cannot be built by accident.
+
+**A confounder probe with no pixels in it.** `site_prior` predicts a child's
+label from the collection site alone. If site identity is predictive, every
+in-distribution number is partly measuring "which facility is this".
+
+**Metrics a clinician would ask for.** AUROC, AUPRC, sensitivity at 90%
+specificity, and calibration. `classification_report` does not return accuracy
+at all — on a 60/40 split it would flatter every model here. AUROC ≥ 0.99 comes
+back tagged as a suspected leak rather than a win.
+
+### Result
+
+Twenty-four training runs across four configurations. The finding is negative
+and it is stable:
+
+| patient-level | cross-site (8 hospitals) | |
+|---|---|---|
+| colour logistic, 11 features | **0.668** | **0.593** |
+| ConvNeXt-Tiny, 27.8M params | 0.627 | 0.603 |
+| `site_prior`, zero pixels | 0.660 | 0.500 |
+| majority class | 0.500 | — |
+
+**A pretrained ConvNeXt-Tiny does not beat eleven colour statistics** — not on
+the optimistic split, not across hospitals, and not in any of the four
+preprocessing variants tried (0.627 / 0.618 / 0.603). At 90% specificity it
+catches 6% of anemic children against colour's 22%. Neither is deployable.
+
+**Knowing the hospital is nearly as predictive as seeing the photo** (0.660 vs
+0.668), and that signal vanishes on an unseen site while the colour signal
+survives at 0.593. There is real pallor information here; it is just weak.
+
+Three decisions changed what got reported, and all three were caught by
+measurement rather than intuition:
+
+- The images are pre-segmented strips on black, with the background covering
+  52–92% of the frame and varying 40 points between images. Unmasked, the colour
+  features encoded the crop outline instead of the pallor.
+- Two hospitals contribute 8 and 15 images and scored AUROC 0.857 and 1.000.
+  Averaging them as equals of a 134-image fold reported the generalisation gap
+  as +0.008; excluding them gives **+0.075**. That was the difference between a
+  flattering number and a true one.
+- **The project's own headline explanation turned out to be wrong.** Grad-CAM
+  showed attention on the black background, and two experiments were built on
+  the theory that the CNN was reading the hand-traced segmentation outline. A
+  positive control — the same network trained on binary silhouettes, no colour,
+  no texture — scored AUROC 0.530 with a bootstrap CI of [0.404, 0.640]. The
+  outline predicts nothing. The saliency reading was over-interpretation, and
+  the remaining explanation for the CNN's 0.399–0.871 swing across hospitals is
+  the mundane one: 28M parameters on ~500 images are unstable.
+
+### Limitations
+
+This is a screening signal, not a diagnosis; lab hemoglobin remains the
+reference standard, and nothing here is a medical device.
+
+The population is the dataset's own — children aged 6–59 months in ten Ghanaian
+hospitals — and no claim extends past it. 710 images is small for deep learning,
+which is itself part of the finding rather than an excuse: at this scale a
+27.8M-parameter network has no advantage over a linear model on eleven features.
+
+Every result is single-seed. With this much data, seed-to-seed variation is
+plausibly ±0.05 AUROC, so the honest statement is "the CNN fails to beat colour",
+not "colour beats the CNN". Multiple seeds per configuration would settle it.
+
+The cross-site average rests on eight hospitals, two of which are excluded as
+too small to measure anything. Claiming this generalises would need a second
+dataset from a different country, different phones, and a different segmentation
+protocol — the last of which we now know matters less than suspected, but only
+because it was tested.
+
+What would move the needle is more data, not a bigger model. That conclusion is
+the opposite of where this project started, and it is the one the measurements
+support.
 
 ## Working with Claude Code
 
