@@ -132,13 +132,51 @@ everywhere. That variance is the signature of a shortcut, and Grad-CAM
 (`reports/runs/*/gradcam.png`) shows the heat sitting on the black background
 and the crop silhouette rather than on the conjunctiva.
 
-**Known asymmetry in this comparison.** The colour baseline gets `roi_mask`, so
-it cannot see the segmentation outline; the CNN is fed the raw frame and can.
-The silhouette was hand-traced per hospital, so the very confounder blocked for
-the baseline was left available to the CNN. These results therefore support "this
-CNN, trained this way, does not beat colour and depends on the site" — **not**
-"pallor cannot do better". Separating those two needs a matched rerun with the
-ROI bounding box cropped and stronger geometric augmentation.
+**Known asymmetry in experiment 1.** The colour baseline gets `roi_mask`, so it
+cannot see the segmentation outline; the CNN was fed the raw frame and can. The
+silhouette was hand-traced per hospital, so the confounder blocked for the
+baseline was left available to the CNN. Experiment 2 below was run to close that
+gap.
+
+### Experiment 2: the matched rerun (partially failed, reported anyway)
+
+Same seed, splits, backbone and resolution, with the segmentation background
+repainted a random colour on every training view (`fill_background`) plus
+stronger geometric augmentation. Two other removal mechanisms were tried first
+and rejected on measurement, not on taste: cropping to the ROI bounding box
+changes nothing here (a conjunctiva is a crescent whose bounding box is the whole
+frame — background stayed at a median 72% either way), and tissue-only patch
+sampling is infeasible (a window at 50% of the shorter side reaches ≥90% tissue
+in only 18% of images).
+
+| | mean | range | std |
+|---|---|---|---|
+| experiment 1 (raw frame) | 0.603 | 0.399–0.871 | 0.163 |
+| experiment 2, all folds | 0.599 | 0.510–0.725 | 0.070 |
+| experiment 2, non-collapsed folds only | 0.589 | 0.510–0.725 | 0.087 |
+| colour logistic | 0.593 | 0.515–0.701 | 0.068 |
+
+**The intervention broke training in three of eight evaluable folds.** In those
+runs every prediction lands inside a band of 0.004–0.025 centred on the training
+prevalence: the model collapsed to predicting the base rate. Those folds still
+report an AUROC, built on differences of ~0.001 between scores, and it should not
+be read as a measurement. The patient-level run collapsed too, which also means
+its apparently excellent ECE of 0.028 is an artefact — a constant predictor at
+the base rate is calibrated by construction, not by merit.
+
+So experiment 2 does **not** cleanly answer the question it was built for. What
+survives it:
+
+- **The headline is unchanged and now triply confirmed.** 0.603, 0.599, 0.589 —
+  every way of slicing it lands on the colour baseline's 0.593. The CNN ties an
+  eleven-feature logistic regression whether or not the shortcut is available.
+- **The dispersion claim is weaker than the all-folds table suggests.** Comparing
+  only the five folds that trained properly, the spread falls from std 0.132 to
+  0.087 — a real reduction, but half the apparent effect, and n=5 makes it soft.
+
+A diagnostic isolating the two interventions (background randomisation without
+the aggressive augmentation) is what would tell us whether the collapse is
+fixable and the experiment worth rerunning.
 
 **Two hospitals contribute 8 and 15 images** and are reported but excluded from
 cross-site averages. The colour baseline scored AUROC 1.000 on the 15-image one —

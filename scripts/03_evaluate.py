@@ -127,7 +127,13 @@ def gradcam_grid(run: Path, meta: dict, n_images: int = 8) -> None:
     h2 = target.register_full_backward_hook(
         lambda m, gi, go: grads.__setitem__("g", go[0].detach()))
 
-    ds = make_dataset(picks, cfg.data_dir, cfg.image_size, train=False)
+    # Must mirror the run's own evaluation preprocessing. A model tested on a
+    # grey-filled background but visualised on the raw black one would produce a
+    # heatmap of a situation it was never scored in.
+    ds = make_dataset(picks, cfg.data_dir, cfg.image_size, train=False,
+                      crop_to_roi=cfg.crop_to_roi,
+                      randomise_background=cfg.randomise_background,
+                      seed=cfg.seed)
     mean = np.array(IMAGENET_MEAN).reshape(3, 1, 1)
     std = np.array(IMAGENET_STD).reshape(3, 1, 1)
 
