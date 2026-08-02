@@ -12,10 +12,11 @@ seen?
 > Screening signal, **not** a diagnosis. Reference standard is lab hemoglobin.
 > Dataset is young children in Ghana across ten sites; claims stop there.
 
-**Status: baselines run on real CP-AnemiC data; CNN not yet trained.**
-The colour baseline and the confounder audit have been run on all 710 images
-across ten Ghanaian hospitals. The deep model has not. See [Results](#results).
-The images themselves are never committed.
+**Status: full experiment run on real CP-AnemiC data.** Baselines, confounder
+audit, and eleven ConvNeXt-Tiny runs across all 710 images and ten Ghanaian
+hospitals. Headline: the CNN does not beat an eleven-feature colour model, and
+its per-hospital variance is 2.5× the baseline's. See [Results](#results). The
+images themselves are never committed.
 
 ## Why this repo looks the way it does
 
@@ -95,37 +96,53 @@ project and it is available on day one.
 
 ## Results
 
-Real CP-AnemiC: 710 images, ten hospitals, 59.7% anemic. Colour baseline only —
-**no CNN has been trained yet**, so nothing below is a deep-learning result.
+Real CP-AnemiC: 710 images, 710 rows, ten Ghanaian hospitals, 59.7% anemic.
+Eleven runs: one patient-level, one per held-out hospital. Seed 42,
+`split_hash` recorded with every number.
 
-| | AUROC | AUPRC | sens @ 90% spec | ECE |
-|---|---|---|---|---|
-| majority class (the floor) | 0.500 | 0.604 | 0.000 | — |
-| colour logistic, patient-level | **0.668** | 0.729 | 0.219 | 0.110 |
-| colour logistic, unseen hospital (8 sites) | **0.593** | — | — | — |
-| **generalisation gap** | **+0.075** | +0.042 | | |
-| `site_prior` probe, patient-level | 0.660 | 0.735 | 0.250 | 0.036 |
-| `site_prior` probe, unseen hospital | 0.500 | — | — | — |
+| | patient-level | cross-site (8 hospitals) | gap |
+|---|---|---|---|
+| **ConvNeXt-Tiny**, 27.8M params | 0.627 | 0.603 | +0.024 |
+| **colour logistic**, 11 features | **0.668** | 0.593 | +0.075 |
+| `site_prior` probe (zero pixels) | 0.660 | 0.500 | — |
+| majority class (the floor) | 0.500 | — | — |
 
-Three things worth stating plainly:
+**A pretrained ConvNeXt-Tiny does not beat eleven colour statistics.** It loses
+on the patient-level split (−0.041 AUROC) and ties across hospitals. At 90%
+specificity it catches 6% of anemic children against the colour model's 22%.
+Neither is deployable; the expensive one is worse.
 
 **Knowing which hospital took the photo is almost as predictive as the photo.**
-The `site_prior` probe uses zero pixels and reaches 0.660 against the colour
-model's 0.668. On the optimistic split the image adds very little over the site
-confounder. The colour signal does transfer (0.593 on unseen hospitals) while
-site identity collapses to chance, so there is real pallor signal — it is just
-weak.
+The `site_prior` probe uses no pixels and reaches 0.660, against colour's 0.668.
+It collapses to chance on an unseen hospital while the colour signal survives at
+0.593 — so there is real pallor signal, it is just weak.
 
-**This is not yet a usable screening tool.** At 90% specificity the colour model
-catches 22% of anemic children. Four in five are missed.
+**The dispersion matters more than the mean.** Across the eight evaluable
+hospitals:
 
-**Two hospitals contribute 8 and 15 images** and scored AUROC 0.857 and 1.000.
-Those folds cannot measure anything, and averaging them as equals of a
-134-image fold moved the reported gap from +0.075 to +0.008. They are reported
-but excluded from cross-site averages.
+| | mean | min | max | std | range |
+|---|---|---|---|---|---|
+| ConvNeXt-Tiny | 0.603 | 0.399 | 0.871 | 0.163 | 0.472 |
+| colour logistic | 0.593 | 0.515 | 0.701 | 0.068 | 0.186 |
 
-The pipeline was verified end to end on a synthetic stand-in before the real
-data arrived; that exercise is a statement about the code, not about anemia.
+Same mean, **2.5× the spread**. The CNN scores 0.871 at one hospital and 0.399 —
+below chance — at another, falling under 0.5 in two of eight. Pallor is the same
+biology everywhere, so a model that learned it would perform similarly
+everywhere. That variance is the signature of a shortcut, and Grad-CAM
+(`reports/runs/*/gradcam.png`) shows the heat sitting on the black background
+and the crop silhouette rather than on the conjunctiva.
+
+**Known asymmetry in this comparison.** The colour baseline gets `roi_mask`, so
+it cannot see the segmentation outline; the CNN is fed the raw frame and can.
+The silhouette was hand-traced per hospital, so the very confounder blocked for
+the baseline was left available to the CNN. These results therefore support "this
+CNN, trained this way, does not beat colour and depends on the site" — **not**
+"pallor cannot do better". Separating those two needs a matched rerun with the
+ROI bounding box cropped and stronger geometric augmentation.
+
+**Two hospitals contribute 8 and 15 images** and are reported but excluded from
+cross-site averages. The colour baseline scored AUROC 1.000 on the 15-image one —
+ranking two negatives — and the red-flag rule caught it automatically.
 
 ## Case study (fill in as real results land)
 

@@ -37,6 +37,14 @@ from hemogaze import splits as S
 from hemogaze.config import Config, load_config
 
 
+def slug(text: str) -> str:
+    """Filesystem-safe run name. CP-AnemiC sites are full hospital names with
+    spaces ("Komfo Anokye Teaching Hospital"), and a run directory with spaces
+    in it has to be quoted at every later call site. The site itself is still
+    recorded verbatim inside test_metrics.json."""
+    return "".join(c if c.isalnum() else "-" for c in text).strip("-")
+
+
 def seed_everything(seed: int) -> None:
     import torch
     random.seed(seed)
@@ -240,7 +248,7 @@ def main() -> None:
         for site in sorted(df["site"].unique()):
             split = S.leave_one_site_out(df, site, cfg.val_frac, cfg.seed)
             records.append(train_one(cfg, df, split, baselines, site,
-                                     f"{cfg.run_name}_siteout_{site}"))
+                                     f"{cfg.run_name}_siteout_{slug(site)}"))
         summary = Path(cfg.out_dir) / f"{cfg.run_name}_all_sites.json"
         summary.write_text(json.dumps(records, indent=2))
         aurocs = [r["cnn"]["auroc"] for r in records
@@ -255,7 +263,7 @@ def main() -> None:
     split = (S.leave_one_site_out(df, args.site_out, cfg.val_frac, cfg.seed)
              if args.site_out else
              S.patient_level_split(df, cfg.val_frac, cfg.test_frac, cfg.seed))
-    run_name = (f"{cfg.run_name}_siteout_{args.site_out}" if args.site_out
+    run_name = (f"{cfg.run_name}_siteout_{slug(args.site_out)}" if args.site_out
                 else f"{cfg.run_name}_patient_level")
     train_one(cfg, df, split, baselines, args.site_out, run_name)
 
