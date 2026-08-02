@@ -17,7 +17,7 @@ from hemogaze import baselines as B
 from hemogaze import metrics as M
 from hemogaze import splits as S
 from hemogaze.features import (FEATURE_ORDER, color_features,
-                               features_to_vector, roi_mask)
+                               features_to_vector, roi_bbox, roi_mask)
 
 
 def _fake_meta(n_patients=60, sites=4, seed=0):
@@ -298,6 +298,31 @@ def test_roi_mask_is_a_noop_on_an_unsegmented_photo():
     assert roi_mask(img).mean() > 0.99
 
 
+def test_roi_bbox_finds_the_tight_box():
+    """The crop fed to the CNN must be the tight box around the tissue: that is
+    what removes the framing the network was shown to be reading."""
+    img = np.zeros((40, 60, 3), dtype="uint8")
+    img[10:25, 5:50] = [180, 95, 95]
+    assert roi_bbox(img) == (10, 5, 25, 50)
+
+
+def test_roi_bbox_falls_back_to_the_full_frame_when_empty():
+    """A fully black image must not produce a zero-size crop."""
+    img = np.zeros((12, 20, 3), dtype="uint8")
+    assert roi_bbox(img) == (0, 0, 12, 20)
+
+
+def test_roi_bbox_crop_removes_most_of_the_background():
+    """A strip on a large black canvas: cropping must cut the background
+    fraction sharply, or the shortcut is still on the table."""
+    img = np.zeros((100, 100, 3), dtype="uint8")
+    img[45:55, 10:90] = [180, 95, 95]
+    before = 1.0 - roi_mask(img).mean()
+    t, l, b, r = roi_bbox(img)
+    after = 1.0 - roi_mask(img[t:b, l:r]).mean()
+    assert before > 0.9 and after == pytest.approx(0.0)
+
+
 def test_color_features_respect_the_roi_mask():
     img = np.zeros((10, 10, 3), dtype="uint8")
     img[:5, :, 0] = 200                              # bright red top half only
@@ -360,6 +385,55 @@ def test_site_prior_probe_collapses_on_an_unseen_site():
     s = S.leave_one_site_out(df, "SITE_0")
     scores = B.site_prior_scores(df, s.train_idx, s.test_idx)
     assert scores.min() == scores.max()
+
+
+# ---- shortcut removal (needs torch, so guarded) ----------------------------
+
+torch_missing = False
+try:
+    from hemogaze.dataset import NEUTRAL_FILL, fill_background
+except ImportError:                      # no deep-learning stack installed
+    torch_missing = True
+
+needs_torch = pytest.mark.skipif(torch_missing, reason="torch not installed")
+
+
+@needs_torch
+def test_background_fill_leaves_the_tissue_untouched():
+    """The intervention must destroy the background as a cue without altering a
+    single pixel of the thing we actually want the model to read."""
+    from PIL import Image
+    a = np.zeros((20, 30, 3), dtype="uint8")
+    a[5:15, 5:25] = [180, 95, 95]
+    out = np.asarray(fill_background(Image.fromarray(a), train=True,
+                                     rng=np.random.default_rng(0)))
+    assert (out[5:15, 5:25] == [180, 95, 95]).all()
+    assert not (out[0, 0] == 0).all()            # background was repainted
+
+
+@needs_torch
+def test_background_fill_is_deterministic_at_evaluation():
+    """A test-time prediction must not depend on a random draw."""
+    from PIL import Image
+    a = np.zeros((12, 12, 3), dtype="uint8")
+    a[4:8, 4:8] = [180, 95, 95]
+    one = np.asarray(fill_background(Image.fromarray(a), train=False))
+    two = np.asarray(fill_background(Image.fromarray(a), train=False))
+    assert (one == two).all()
+    assert (one[0, 0] == NEUTRAL_FILL).all()
+
+
+@needs_torch
+def test_background_fill_actually_varies_between_draws():
+    """If two training draws produced the same fill, the background would still
+    be a stable feature and the whole intervention would be theatre."""
+    from PIL import Image
+    a = np.zeros((12, 12, 3), dtype="uint8")
+    a[4:8, 4:8] = [180, 95, 95]
+    rng = np.random.default_rng(0)
+    one = np.asarray(fill_background(Image.fromarray(a), train=True, rng=rng))
+    two = np.asarray(fill_background(Image.fromarray(a), train=True, rng=rng))
+    assert not (one[0, 0] == two[0, 0]).all()
 
 
 if __name__ == "__main__":

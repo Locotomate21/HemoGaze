@@ -14,6 +14,11 @@ class Config:
     metadata_csv: str = "data/cp-anemic/metadata.csv"
     image_size: int = 224
     roi_black_threshold: int = 20   # pixels dimmer than this are background
+    # Shortcut removal for the CNN. Off by default so the first experiment stays
+    # reproducible; config/cpanemic_roi.yaml turns both on.
+    crop_to_roi: bool = False       # crop away the framing before the network sees it
+    strong_aug: bool = False        # RandomResizedCrop so the silhouette stops being reliable
+    randomise_background: bool = False   # redraw the segmentation background every epoch
 
     # split
     seed: int = 42

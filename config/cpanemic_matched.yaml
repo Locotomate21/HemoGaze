@@ -1,0 +1,75 @@
+# Experiment 2: the matched rerun.
+#
+# Experiment 1 (config/cpanemic.yaml) found that ConvNeXt-Tiny does not beat an
+# eleven-feature colour model, and that its AUROC swings 0.399-0.871 across
+# hospitals against the baseline's 0.515-0.701. Grad-CAM showed why: the network
+# attends to the black segmentation background and the hand-traced outline, not
+# to the tissue. That outline is drawn by different people at different
+# hospitals, so it is a site fingerprint.
+#
+# That comparison was not matched. The colour baseline is computed over
+# roi_mask() and cannot see geometry at all; the CNN was handed the raw frame.
+# This config removes the difference as far as the data allows, so the question
+# becomes answerable: does the CNN still fail once the shortcut is weakened?
+#
+# What was tried and rejected, measured on the real images rather than assumed:
+#
+#   crop_to_roi        -- useless here. The conjunctiva is a thin curved crescent
+#                         spanning the frame diagonally, so its bounding box is
+#                         basically the whole image: background stayed at a
+#                         median 72% before and after cropping.
+#   tissue-only patches -- infeasible. Even a window at 50% of the shorter side
+#                         reached >=90% tissue coverage in only 18% of images;
+#                         the strips are too thin to inscribe a square.
+#
+# What is used instead:
+#
+#   randomise_background -- repaint the background a random colour plus noise on
+#                         every training view, mid-grey at evaluation. A feature
+#                         that changes every epoch cannot carry a stable label
+#                         association.
+#   strong_aug          -- RandomResizedCrop 0.5-1.0 plus flips and +/-20 deg,
+#                         so absolute position and scale of the outline stop
+#                         being reliable. The scale floor is 0.5 rather than 0.3
+#                         on purpose: smaller crops often contain no tissue, and
+#                         that label noise would be indistinguishable from the
+#                         effect under test.
+#
+# Honest limit, repeated here so it travels with the numbers: this weakens the
+# shortcut, it does not prove it gone. The tissue/fill boundary still traces the
+# same hand-drawn shape. A null result here is therefore strong evidence, and a
+# positive result would still deserve a fresh Grad-CAM check.
+#
+# Everything else is identical to experiment 1 -- same seed, same splits, same
+# backbone, same resolution -- so the two are directly comparable.
+data_dir: data/cp-anemic
+metadata_csv: data/cp-anemic/metadata.csv
+image_size: 128
+roi_black_threshold: 20
+crop_to_roi: false
+strong_aug: true
+randomise_background: true
+
+seed: 42
+val_frac: 0.15
+test_frac: 0.15
+
+backbone: convnext_tiny
+pretrained: true
+dropout: 0.3
+
+epochs: 30
+batch_size: 16
+lr: 0.0001
+weight_decay: 0.01
+early_stop_patience: 6
+warmup_epochs: 2
+num_workers: 0
+device: auto
+
+spec_target: 0.90
+n_calib_bins: 10
+
+out_dir: reports/runs_matched
+run_name: matched128
+baseline_dir: reports/baselines

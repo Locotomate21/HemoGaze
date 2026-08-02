@@ -51,6 +51,39 @@ def roi_mask(img: np.ndarray, black_threshold: int = 20) -> np.ndarray:
     return img.max(axis=-1) > black_threshold
 
 
+def roi_bbox(img: np.ndarray, black_threshold: int = 20) -> tuple[int, int, int, int]:
+    """Tight bounding box of the ROI as (top, left, bottom, right), end-exclusive.
+
+    Used to strip the framing before a CNN sees the image. In the first
+    CP-AnemiC experiment the network was fed the full frame, 73% of which is
+    black, and Grad-CAM showed it attending to that background and to the
+    silhouette of the hand-traced crop rather than to the tissue. The outline
+    was traced by different people at different hospitals, so it is a site
+    fingerprint -- exactly the confounder the colour baseline never had access
+    to, because averaging over a mask discards geometry.
+
+    Cropping does not change the colour baseline at all (its statistics already
+    ignore every background pixel), which is what makes it a matched
+    intervention rather than merely a different one.
+
+    **Measured to be useless on CP-AnemiC, and kept for the record.** A
+    conjunctiva is a thin curved crescent spanning the frame diagonally, so its
+    bounding box is essentially the whole image: over 80 real images the
+    background fraction was a median 72% before cropping and 72% after. It works
+    as intended on a compact ROI, which is why the tests pass -- it just does not
+    describe this dataset. Use ``randomise_background`` instead here.
+
+    Falls back to the full frame if the mask is empty, so a fully-black or
+    unsegmented image cannot produce a degenerate crop.
+    """
+    mask = roi_mask(img, black_threshold)
+    if not mask.any():
+        return 0, 0, img.shape[0], img.shape[1]
+    rows = np.where(mask.any(axis=1))[0]
+    cols = np.where(mask.any(axis=0))[0]
+    return int(rows[0]), int(cols[0]), int(rows[-1]) + 1, int(cols[-1]) + 1
+
+
 def color_features(img: np.ndarray, mask: np.ndarray | None = None) -> dict:
     """Extract pallor-relevant colour statistics over the ROI.
 
