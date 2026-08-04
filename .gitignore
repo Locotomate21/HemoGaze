@@ -1,9 +1,9 @@
-# never commit patient data
-data/cp-anemic/
-data/synthetic/
-data/**/*.jpg
-data/**/*.png
-data/**/*.csv
+# Patient data: deny everything under data/, then allow back only the docs.
+# A whitelist rather than a list of known dataset folders, because the previous
+# version enumerated data/cp-anemic/ and data/synthetic/ by name -- so a new
+# dataset dropped into data/ was not covered until someone remembered to add it.
+data/*
+!data/README.md
 
 # runs & artifacts
 reports/
@@ -18,3 +18,4 @@ __pycache__/
 .venv/
 .pytest_cache/
 .ipynb_checkpoints/
+.ruff_cache/

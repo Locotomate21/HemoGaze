@@ -12,14 +12,17 @@ seen?
 > Screening signal, **not** a diagnosis. Reference standard is lab hemoglobin.
 > Dataset is young children in Ghana across ten sites; claims stop there.
 
-**Status: four experiments run on real CP-AnemiC data.** Baselines, confounder
+**Status: five experiments, including external validation on a second
+dataset.** Baselines, confounder
 audit, 35 ConvNeXt-Tiny runs across all 710 images and ten Ghanaian hospitals, a
 positive control, and a hemoglobin-regression variant. Headline: on the
 classification task the CNN does not beat an eleven-feature colour model in any
 configuration; on the regression task it beats it by a small but paired-stable
 margin, and neither is clinically usable. The shortcut explanation this project
 first offered for the classification failure was tested and **refuted by its own
-control**. See [Results](#results). The images themselves are never committed.
+control**. Applied unchanged to Italian and Indian adults, the colour–hemoglobin
+relationship **inverts** (Spearman +0.24 in-sample → −0.53 in Italy). See
+[Results](#results). No patient images are ever committed.
 
 ## Why this repo looks the way it does
 
@@ -282,6 +285,63 @@ inflates the denominator). The correlation between a site's deviation from the
 global mean and its MAE ratio is **+0.35** — the opposite direction to what that
 explanation predicts. At n=8 it settles nothing, but it does not support it.
 
+### Experiment 5: external validation — the signal inverts
+
+Everything above stays inside CP-AnemiC. This applies the Ghana-trained
+hemoglobin regressor, unchanged and unretrained, to
+[Eyes-Defy-Anemia](https://www.kaggle.com/datasets/harshwardhanfartale/eyes-defy-anemia):
+145 usable palpebral images of Italian and Indian **adults aged 19–88**, against
+CP-AnemiC's Ghanaian **children aged 6–59 months**. Different continent,
+different phones, different clinicians, different segmentation protocol.
+
+This comparison is only possible because the model predicts g/dL rather than a
+label: the WHO cutoff is applied afterwards, per patient (12 g/dL for women, 13
+for men). A model trained on the child threshold of 11 could not have been
+evaluated here at all.
+
+| | raw MAE | bias | bias-corrected MAE* |
+|---|---|---|---|
+| predict the CP-AnemiC mean | 2.77 | −2.25 | 2.04 |
+| colour ridge (Ghana-trained) | 2.41 | −1.29 | 2.22 |
+| ConvNeXt-Tiny (Ghana-trained) | 2.37 | −1.28 | 2.12 |
+
+\* diagnostic only — it subtracts an offset computed from the test labels, so it
+is not a deployable number.
+
+The target itself shifts +2.25 g/dL between populations, so some error was
+guaranteed. The interesting result is not the magnitude:
+
+**The colour–hemoglobin relationship reverses.** Spearman correlation between
+true and predicted Hb:
+
+| | Spearman | p | n |
+|---|---|---|---|
+| CP-AnemiC (in-sample reference) | **+0.240** | — | 710 |
+| Eyes-Defy, all | **−0.282** | 0.0006 | 145 |
+| — India | +0.194 | 0.127 | 63 |
+| — **Italy** | **−0.526** | <0.0001 | 82 |
+
+On Italian adults the model is not merely uninformative, it is **confidently
+wrong**: the conjunctivas it scores as palest belong to the patients with the
+highest hemoglobin. Deployed there, it would systematically flag the healthy and
+clear the anemic. India sits between the two, weakly positive and not
+significant.
+
+*A hypothesis, offered as a hypothesis:* the ordering Ghana → India → Italy
+tracks how far each population's pigmentation and imaging protocol sit from the
+training set, which would be consistent with the colour features encoding
+something about skin and camera rather than pallor. This project already
+asserted one confident mechanistic explanation and had it refuted by its own
+control, so this one stays labelled until someone tests it — for instance by
+checking whether a white-balance normalisation removes the inversion.
+
+**A caveat on the derived classification numbers** (AUROC 0.267–0.353): with
+sex-specific cutoffs, even a *constant* Hb prediction becomes a sex classifier,
+and in this sample women are far more anemic (0.627) than men (0.326) while men
+carry the higher threshold. The trivial baseline therefore scores 0.353 rather
+than 0.500, and all three models cluster near it. The Spearman correlations
+above are the clean measurement because no threshold enters them.
+
 ## Case study
 
 ### Problem
@@ -372,10 +432,10 @@ plausibly ±0.05 AUROC, so the honest statement is "the CNN fails to beat colour
 not "colour beats the CNN". Multiple seeds per configuration would settle it.
 
 The cross-site average rests on eight hospitals, two of which are excluded as
-too small to measure anything. Claiming this generalises would need a second
-dataset from a different country, different phones, and a different segmentation
-protocol — the last of which we now know matters less than suspected, but only
-because it was tested.
+too small to measure anything. That second dataset has since been tested
+(experiment 5), and the answer is worse than "does not generalise": on Italian
+adults the colour–hemoglobin relationship runs backwards. Whether that is
+pigmentation, white balance, or adult-versus-infant anatomy is untested.
 
 What would move the needle is more data, not a bigger model. That conclusion is
 the opposite of where this project started, and it is the one the measurements
