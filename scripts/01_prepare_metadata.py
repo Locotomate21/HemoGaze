@@ -120,7 +120,11 @@ def main() -> None:
         "image_id": "images/" + df["IMAGE_ID"] + ".png",
         # See the module docstring: no patient identifier exists in this dataset.
         "patient_id": df["IMAGE_ID"],
-        "site": df["HOSPITAL"],
+        # Stripped: the source sheet stores "Komfo Anokye Teaching Hospital "
+        # with a trailing space. Today only one variant exists so nothing is
+        # split, but two spellings of one hospital would silently become two
+        # sites and quietly corrupt every leave-one-site-out fold.
+        "site": df["HOSPITAL"].str.strip(),
         "label": df["label"],
         "hemoglobin": df["HB_LEVEL"],
         "age_months": df["Age(Months)"],

@@ -12,12 +12,14 @@ seen?
 > Screening signal, **not** a diagnosis. Reference standard is lab hemoglobin.
 > Dataset is young children in Ghana across ten sites; claims stop there.
 
-**Status: three experiments run on real CP-AnemiC data.** Baselines, confounder
-audit, 22 ConvNeXt-Tiny runs across all 710 images and ten Ghanaian hospitals,
-plus a positive control. Headline: the CNN does not beat an eleven-feature
-colour model in any configuration — and the shortcut explanation this project
-first offered for that was tested and **refuted by its own control**. See
-[Results](#results). The images themselves are never committed.
+**Status: four experiments run on real CP-AnemiC data.** Baselines, confounder
+audit, 35 ConvNeXt-Tiny runs across all 710 images and ten Ghanaian hospitals, a
+positive control, and a hemoglobin-regression variant. Headline: on the
+classification task the CNN does not beat an eleven-feature colour model in any
+configuration; on the regression task it beats it by a small but paired-stable
+margin, and neither is clinically usable. The shortcut explanation this project
+first offered for the classification failure was tested and **refuted by its own
+control**. See [Results](#results). The images themselves are never committed.
 
 ## Why this repo looks the way it does
 
@@ -230,6 +232,56 @@ That is the correct behaviour, and it retroactively explains those collapses as
 cross-site averages. The colour baseline scored AUROC 1.000 on the 15-image one —
 ranking two negatives — and the red-flag rule caught it automatically.
 
+### Experiment 4: predicting hemoglobin instead of a label
+
+Everything above asks "anemic yes or no". Regressing hemoglobin in g/dL is the
+more general target, and it is what makes an external dataset usable at all: the
+WHO cutoff is applied *after* the model, so one set of predictions serves
+children at 11 g/dL and adults at 12 (women) / 13 (men). A binary model is
+married to the threshold it was trained on. The binary label was also discarding
+most of the signal — "anemic" in CP-AnemiC spans Hb 3.1 to 10.9, so a child
+needing transfusion and one a tenth below the cutoff carried the same target.
+
+The floor is no longer the majority class but **predicting the training mean**,
+which on this data is 1.73–1.80 g/dL depending on the split.
+
+| | patient-level MAE | cross-site MAE (8 hospitals) | vs. trivial |
+|---|---|---|---|
+| ConvNeXt-Tiny | 1.74 | **1.68** | 0.93 |
+| colour ridge | **1.69** | 1.78 | 0.99 |
+| predict the mean | 1.73 | 1.80 | 1.00 |
+
+**In this framing the CNN beats the colour baseline cross-site — the reverse of
+the classification result.** Paired across the same eight folds the difference is
++0.102 g/dL in its favour, winning 5 of 8, 95% CI [+0.010, +0.193], which
+excludes zero but barely. The ridge penalty was swept over five orders of
+magnitude (cross-site MAE moves only 1.783 → 1.799), so the baseline is not
+crippled and the gap is real.
+
+Two things stop that being a win:
+
+**The CNN does better cross-site (1.68) than patient-level (1.74)**, which is
+backwards — the harder split should not beat the easier one. The mundane
+explanation is that each leave-one-site-out fold trains on ~600 images against
+the patient-level split's 498. A 20% data increase moving the result this much
+says the model is data-starved, which supports "more data, not a bigger model"
+rather than "the model works".
+
+**It is still clinically useless.** MAE 1.68 g/dL with Bland-Altman limits of
+agreement near ±4 g/dL, against a scale running 3 to 17. Being 6% better than
+colour and 7% better than guessing the mean does not make a measurement.
+
+The regression view also exposes how weak the signal is in a way AUROC hid.
+AUROC 0.668 reads as "weak but real"; ±1.7 g/dL reads as what it is. The two do
+not conflict — AUROC measures ranking, MAE measures magnitude, and colour can
+rank slightly better than chance without estimating the value.
+
+*A hypothesis tested and dropped:* the cross-site improvement was first
+attributed to an easier trivial floor (a held-out site far from the global mean
+inflates the denominator). The correlation between a site's deviation from the
+global mean and its MAE ratio is **+0.35** — the opposite direction to what that
+explanation predicts. At n=8 it settles nothing, but it does not support it.
+
 ## Case study
 
 ### Problem
@@ -350,10 +402,11 @@ src/hemogaze/   splits · metrics · features · baselines · dataset · model �
                 (only dataset + model import torch)
 scripts/        01_prepare_metadata → 00_eda_baseline → 02_train → 03_evaluate
                 make_synthetic_data.py  (plumbing, not pipeline)
-tests/          test_smoke.py  (40 tests: splits, leakage, metrics, baselines,
-                ROI masking, shortcut controls — no data, no GPU)
-config/         default.yaml · cpanemic.yaml · cpanemic_matched.yaml
-                cpanemic_bgonly.yaml · cpanemic_silhouette.yaml · synthetic.yaml
+tests/          test_smoke.py  (47 tests: splits, leakage, metrics, baselines,
+                ROI masking, shortcut controls, Hb regression — no data, no GPU)
+config/         default.yaml · cpanemic.yaml · cpanemic_hb.yaml
+                cpanemic_matched.yaml · cpanemic_bgonly.yaml
+                cpanemic_silhouette.yaml · synthetic.yaml
 reports/        baselines/ · runs/ · summary.md   (git-ignored)
 .claude/agents/ six specialist subagents
 CLAUDE.md       the rigor doctrine
