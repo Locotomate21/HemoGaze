@@ -257,6 +257,58 @@ def test_regression_report_bland_altman():
     assert rep.loa_low <= rep.bias <= rep.loa_high
 
 
+def test_trivial_mae_is_the_floor_the_model_must_beat():
+    """Predicting the training mean is the regression analogue of the
+    majority-class baseline. On CP-AnemiC it is 1.80 g/dL."""
+    hb_train = np.array([8.0, 10.0, 12.0, 14.0])
+    hb_test = np.array([9.0, 11.0, 13.0])
+    assert M.trivial_mae(hb_train, hb_test) == pytest.approx(
+        np.abs(hb_test - 11.0).mean())
+
+
+def test_regression_flags_a_model_that_does_not_beat_the_mean():
+    """A respectable-looking MAE in g/dL means nothing on its own; the ratio to
+    the trivial baseline is what says whether anything was learned."""
+    rng = np.random.default_rng(0)
+    hb_train = rng.normal(10.4, 2.26, 400)
+    hb_test = rng.normal(10.4, 2.26, 100)
+    useless = np.full(100, hb_train.mean() + 0.01)   # essentially the mean
+    rep = M.regression_report(hb_test, useless, y_train=hb_train)
+    assert not rep.beats_trivial
+    assert "has not learned to read pallor" in rep.note
+    assert "NO BETTER" in rep.summary_line()
+
+    good = hb_test + rng.normal(0, 0.3, 100)         # a genuinely close model
+    rep2 = M.regression_report(hb_test, good, y_train=hb_train)
+    assert rep2.beats_trivial and rep2.mae_vs_trivial < 0.3
+    assert rep2.note == ""
+
+
+def test_classify_from_hb_applies_the_cutoff_after_the_model():
+    """The whole reason to regress Hb: one set of predictions serves children at
+    11 g/dL and adults at 12/13, including a per-person cutoff array."""
+    hb_pred = np.array([9.0, 11.5, 12.5, 14.0])
+    child = M.classify_from_hb(hb_pred, 11.0)
+    assert (child > 0) .tolist() == [True, False, False, False]
+
+    # sex-specific adult thresholds: women 12, men 13
+    adult = M.classify_from_hb(hb_pred, np.array([12.0, 13.0, 12.0, 13.0]))
+    assert (adult > 0).tolist() == [True, True, False, False]
+    # higher score must mean more anemic, so it flows into classification_report
+    assert child[0] > child[-1]
+
+
+def test_regression_scores_flow_into_the_classification_report():
+    """A regression model must be comparable against every classifier in this
+    repo without a second evaluation path."""
+    hb_true = np.array([8.0, 9.0, 12.0, 13.0, 10.5, 11.5])
+    hb_pred = hb_true + np.array([0.2, -0.1, 0.3, -0.2, 0.1, -0.3])
+    y = (hb_true < 11.0).astype(int)
+    rep = M.classification_report(y, M.classify_from_hb(hb_pred, 11.0),
+                                  spec_target=0.5)
+    assert rep.auroc == pytest.approx(1.0)
+
+
 # ---- colour features -------------------------------------------------------
 
 def test_color_features_shape():
@@ -376,6 +428,34 @@ def test_site_prior_probe_exposes_a_site_confounder():
     scores = B.site_prior_scores(df, s.train_idx, s.test_idx)
     y_te = df.loc[s.test_idx, "label"].to_numpy()
     assert M.classification_report(y_te, scores, spec_target=0.5).auroc > 0.95
+
+
+def test_mean_hb_baseline_is_constant():
+    hb = np.array([8.0, 10.0, 12.0, 14.0])
+    p = B.mean_hb_predictions(hb, 5)
+    assert p.shape == (5,) and p.min() == p.max() == pytest.approx(11.0)
+
+
+def test_colour_ridge_recovers_a_planted_hb_signal():
+    rng = np.random.default_rng(0)
+    hb = rng.normal(10.4, 2.26, 300)
+    X = rng.normal(0, 1, (300, len(FEATURE_ORDER)))
+    X[:, 0] = hb + rng.normal(0, 1.0, 300)           # one informative feature
+    pred, _ = B.fit_colour_ridge(X[:250], hb[:250], X[250:])
+    rep = M.regression_report(hb[250:], pred, y_train=hb[:250])
+    assert rep.beats_trivial and rep.mae_vs_trivial < 0.7
+
+
+def test_site_mean_hb_probe_collapses_on_an_unseen_site():
+    """The regression confounder probe must degrade to the global mean on a
+    hospital it never saw -- site identity does not transfer."""
+    df = _fake_meta(n_patients=80, sites=4)
+    rng = np.random.default_rng(0)
+    df["hemoglobin"] = rng.normal(10.4, 2.0, len(df))
+    s = S.leave_one_site_out(df, "SITE_0")
+    p = B.site_mean_hb(df, s.train_idx, s.test_idx)
+    assert p.min() == p.max()
+    assert p[0] == pytest.approx(df.loc[s.train_idx, "hemoglobin"].mean())
 
 
 def test_site_prior_probe_collapses_on_an_unseen_site():

@@ -21,6 +21,13 @@ class Config:
     randomise_background: bool = False   # redraw the segmentation background every epoch
     silhouette_only: bool = False   # positive control: train on the ROI shape alone
 
+    # task: "classification" predicts the binary label; "regression" predicts
+    # hemoglobin in g/dL. Regression is the more general target -- the WHO
+    # cutoff (11 for children, 12/13 for adults) is applied after the model, so
+    # one set of predictions serves any population.
+    task: str = "classification"
+    target_col: str = "hemoglobin"   # used when task == "regression"
+
     # split
     seed: int = 42
     val_frac: float = 0.15

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -76,6 +76,63 @@ def fit_colour_logistic(X_train, y_train, X_test, *, seed: int = 42
     clf = colour_logistic(seed=seed)
     clf.fit(X_train, y_train)
     return clf.predict_proba(X_test)[:, 1], clf
+
+
+# ---- Hemoglobin regression -------------------------------------------------
+#
+# Same three-baseline discipline as the classification task. Predicting Hb
+# rather than a binary label is what lets one model serve children (WHO cutoff
+# 11 g/dL) and adults (12 women / 13 men): the threshold is applied after the
+# model, not baked into it.
+
+def mean_hb_predictions(hb_train, n_test: int) -> np.ndarray:
+    """Predict the training mean for everyone. The floor for the regression
+    task, exactly as majority-class is the floor for classification."""
+    hb_train = np.asarray(hb_train, dtype=float)
+    if hb_train.size == 0:
+        raise ValueError("Cannot fit a mean baseline on an empty train set.")
+    return np.full(int(n_test), float(hb_train.mean()), dtype=float)
+
+
+def colour_ridge(alpha: float = 1.0) -> Pipeline:
+    """Standardise then ridge-regress hemoglobin on the colour features.
+
+    Ridge rather than plain least squares because the eleven colour features are
+    strongly collinear -- r_mean, r_p10, r_p90 and rg_ratio all move together --
+    and unpenalised coefficients on collinear inputs are unstable across the
+    leave-one-site-out folds, which would show up as site variance that is really
+    just fitting noise.
+    """
+    return make_pipeline(StandardScaler(), Ridge(alpha=alpha))
+
+
+def fit_colour_ridge(X_train, hb_train, X_test, *, alpha: float = 1.0
+                     ) -> tuple[np.ndarray, Pipeline]:
+    """Fit the colour regression baseline; returns (test predictions, model).
+    The scaler sees train only, for the same reason as in the classifier."""
+    X_train = np.asarray(X_train, dtype=float)
+    X_test = np.asarray(X_test, dtype=float)
+    hb_train = np.asarray(hb_train, dtype=float)
+    model = colour_ridge(alpha)
+    model.fit(X_train, hb_train)
+    return model.predict(X_test), model
+
+
+def site_mean_hb(df: pd.DataFrame, train_idx, test_idx) -> np.ndarray:
+    """Confounder probe for the regression task: predict each test image's Hb
+    from the training mean Hb of its own site, using no pixels.
+
+    Unseen sites fall back to the global training mean, so on leave-one-site-out
+    this collapses to the trivial baseline -- which is the honest answer, since
+    a facility you have never visited tells you nothing.
+    """
+    hb_tr = df.loc[train_idx, "hemoglobin"].astype(float)
+    global_mean = float(hb_tr.mean())
+    per_site = df.loc[train_idx].groupby("site")["hemoglobin"].mean()
+    return (df.loc[test_idx, "site"]
+              .map(per_site)
+              .fillna(global_mean)
+              .to_numpy(dtype=float))
 
 
 def site_prior_scores(df: pd.DataFrame, train_idx, test_idx) -> np.ndarray:

@@ -66,26 +66,32 @@ def load_baselines(cfg: Config) -> dict:
     return json.loads(path.read_text())
 
 
-def baseline_for(baselines: dict, site_out: str | None) -> dict:
+def baseline_for(baselines: dict, site_out: str | None,
+                 regression: bool = False) -> dict:
     """The colour-baseline report for the same split this run uses, so the CNN
     is always quoted against a like-for-like comparison."""
+    section, name = (("regression", "colour_ridge") if regression
+                     else ("baselines", "colour_logistic"))
     if site_out is None:
-        return baselines["patient_level"]["baselines"]["colour_logistic"]
+        return baselines["patient_level"][section][name]
     for entry in baselines["leave_one_site_out"]:
         if entry["test_site"] == site_out:
-            return entry["baselines"]["colour_logistic"]
+            return entry[section][name]
     sys.exit(f"No baseline recorded for site {site_out!r}; rerun "
              f"scripts/00_eda_baseline.py so the comparison exists.")
 
 
-def infer(model, dl, device):
+def infer(model, dl, device, regression: bool = False):
+    """Returns (targets, predictions). For regression the head output *is* the
+    prediction in g/dL, so no sigmoid -- squashing it to [0,1] would silently
+    destroy the units the whole task is measured in."""
     import torch
     model.eval()
     ys, ps = [], []
     with torch.no_grad():
         for x, y in dl:
-            logits = model(x.to(device)).squeeze(1)
-            ps.append(torch.sigmoid(logits).cpu().numpy())
+            out = model(x.to(device)).squeeze(1)
+            ps.append((out if regression else torch.sigmoid(out)).cpu().numpy())
             ys.append(y.numpy())
     return np.concatenate(ys), np.concatenate(ps)
 
@@ -102,9 +108,14 @@ def train_one(cfg: Config, df: pd.DataFrame, split: S.Split, baselines: dict,
 
     seed_everything(cfg.seed)
     device = cfg.resolve_device()
+    regression = cfg.task == "regression"
+    target = cfg.target_col if regression else "label"
+    if regression and target not in df.columns:
+        sys.exit(f"task=regression needs a {target!r} column in the metadata.")
 
     def loader(idx, train):
         ds = make_dataset(df.loc[idx], cfg.data_dir, cfg.image_size, train,
+                          target_col=target,
                           crop_to_roi=cfg.crop_to_roi, strong_aug=cfg.strong_aug,
                           randomise_background=cfg.randomise_background,
                           silhouette_only=cfg.silhouette_only, seed=cfg.seed)
@@ -117,20 +128,30 @@ def train_one(cfg: Config, df: pd.DataFrame, split: S.Split, baselines: dict,
 
     model = build_model(cfg.backbone, cfg.pretrained, cfg.dropout).to(device)
 
-    # Class imbalance -> weight the positive class, because the error that
-    # matters in screening is a missed anemic child, not a false alarm.
-    pos = float(df.loc[split.train_idx, "label"].mean())
-    pos_weight = torch.tensor([(1 - pos) / max(pos, 1e-6)], device=device)
-    crit = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    if regression:
+        # L1 rather than MSE: MAE in g/dL is the reported metric, so optimise
+        # the thing being reported, and L1 does not let a handful of severe-anemia
+        # outliers (Hb down to 3.1) dominate the gradient.
+        crit = nn.L1Loss()
+    else:
+        # Class imbalance -> weight the positive class, because the error that
+        # matters in screening is a missed anemic child, not a false alarm.
+        pos = float(df.loc[split.train_idx, "label"].mean())
+        pos_weight = torch.tensor([(1 - pos) / max(pos, 1e-6)], device=device)
+        crit = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr,
                             weight_decay=cfg.weight_decay)
 
     print(f"\n=== training {run_name} on {device} "
           f"({split.kind}: {split.note}, split_hash={split.hash()}) ===")
-    print(f"    train {len(split.train_idx)} / val {len(split.val_idx)} / "
-          f"test {len(split.test_idx)} images, train prevalence {pos:.3f}")
+    tr_target = df.loc[split.train_idx, target].astype(float)
+    print(f"    task={cfg.task}  train {len(split.train_idx)} / "
+          f"val {len(split.val_idx)} / test {len(split.test_idx)} images, "
+          f"train {target} mean {tr_target.mean():.3f}")
 
-    best_auprc, best_state, patience = -1.0, None, 0
+    # One "score", always higher-is-better: AUPRC for classification, negative
+    # MAE for regression, so the selection logic below stays single-path.
+    best_score, best_state, patience = -np.inf, None, 0
     frozen = False
     for epoch in range(cfg.epochs):
         # Head-only warmup: let the fresh head settle before the pretrained
@@ -153,15 +174,24 @@ def train_one(cfg: Config, df: pd.DataFrame, split: S.Split, baselines: dict,
             opt.step()
             running += loss.detach().item() * len(y)
 
-        # Select on AUPRC: imbalance-aware, and never accuracy.
-        ys, ps = infer(model, dl_val, device)
-        rep = M.classification_report(ys, ps, cfg.spec_target, cfg.n_calib_bins)
-        print(f"    epoch {epoch:02d}  loss={running / len(split.train_idx):.4f}  "
-              f"val_auprc={rep.auprc:.3f}  val_auroc={rep.auroc:.3f}  "
-              f"val_ece={rep.ece:.3f}")
+        # Select on AUPRC (imbalance-aware, never accuracy) or on validation
+        # MAE, which is the metric the regression task is reported in.
+        ys, ps = infer(model, dl_val, device, regression)
+        if regression:
+            rep = M.regression_report(ys, ps, y_train=tr_target.to_numpy())
+            score = -rep.mae
+            print(f"    epoch {epoch:02d}  loss={running / len(split.train_idx):.4f}  "
+                  f"val_mae={rep.mae:.3f}  val_bias={rep.bias:+.3f}  "
+                  f"val_vs_trivial={rep.mae_vs_trivial:.2f}x")
+        else:
+            rep = M.classification_report(ys, ps, cfg.spec_target, cfg.n_calib_bins)
+            score = rep.auprc
+            print(f"    epoch {epoch:02d}  loss={running / len(split.train_idx):.4f}  "
+                  f"val_auprc={rep.auprc:.3f}  val_auroc={rep.auroc:.3f}  "
+                  f"val_ece={rep.ece:.3f}")
 
-        if np.isfinite(rep.auprc) and rep.auprc > best_auprc:
-            best_auprc = rep.auprc
+        if np.isfinite(score) and score > best_score:
+            best_score = score
             best_state = {k: v.detach().cpu().clone()
                           for k, v in model.state_dict().items()}
             patience = 0
@@ -172,13 +202,15 @@ def train_one(cfg: Config, df: pd.DataFrame, split: S.Split, baselines: dict,
                 break
 
     if best_state is None:
-        sys.exit("Validation AUPRC was never computable (single-class val set?). "
-                 "Fix the split before trusting anything from this run.")
+        sys.exit("The validation score was never computable (single-class val "
+                 "set?). Fix the split before trusting anything from this run.")
     model.load_state_dict(best_state)
 
-    ys, ps = infer(model, dl_te, device)
-    test_rep = M.classification_report(ys, ps, cfg.spec_target, cfg.n_calib_bins)
-    base = baseline_for(baselines, site_out)
+    ys, ps = infer(model, dl_te, device, regression)
+    test_rep = (M.regression_report(ys, ps, y_train=tr_target.to_numpy())
+                if regression else
+                M.classification_report(ys, ps, cfg.spec_target, cfg.n_calib_bins))
+    base = baseline_for(baselines, site_out, regression)
 
     out = Path(cfg.out_dir) / run_name
     out.mkdir(parents=True, exist_ok=True)
@@ -202,28 +234,47 @@ def train_one(cfg: Config, df: pd.DataFrame, split: S.Split, baselines: dict,
         "split_kind": split.kind,
         "split_note": split.note,
         "split_hash": split.hash(),
+        "task": cfg.task,
         "test_site": site_out,
         "cnn": test_rep.as_dict(),
-        "colour_logistic_baseline": base,
-        "cnn_minus_baseline_auroc": (test_rep.auroc - base["auroc"]
-                                     if np.isfinite(test_rep.auroc) and
-                                     np.isfinite(base["auroc"]) else None),
-        "cnn_minus_baseline_auprc": (test_rep.auprc - base["auprc"]
-                                     if np.isfinite(test_rep.auprc) and
-                                     np.isfinite(base["auprc"]) else None),
+        "colour_baseline": base,
     }
+    if regression:
+        # Lower MAE is better, so the delta is baseline minus CNN: positive
+        # means the CNN helped.
+        record["baseline_mae_minus_cnn_mae"] = base["mae"] - test_rep.mae
+    else:
+        record["colour_logistic_baseline"] = base    # kept for older readers
+        record["cnn_minus_baseline_auroc"] = (
+            test_rep.auroc - base["auroc"]
+            if np.isfinite(test_rep.auroc) and np.isfinite(base["auroc"]) else None)
+        record["cnn_minus_baseline_auprc"] = (
+            test_rep.auprc - base["auprc"]
+            if np.isfinite(test_rep.auprc) and np.isfinite(base["auprc"]) else None)
     (out / "test_metrics.json").write_text(json.dumps(record, indent=2))
 
     print(f"\n    TEST  cnn             {test_rep.summary_line()}")
-    print(f"    TEST  colour baseline "
-          f"AUROC={base['auroc']:.3f}  AUPRC={base['auprc']:.3f}  "
-          f"sens@spec={base['sens_at_spec']:.3f}  ECE={base['ece']:.3f}")
-    delta = record["cnn_minus_baseline_auroc"]
-    if delta is not None:
-        verdict = ("the CNN does NOT clearly beat colour logistic regression -- "
-                   "report that plainly" if delta < 0.03
+    if regression:
+        print(f"    TEST  colour ridge    MAE={base['mae']:.3f} g/dL  "
+              f"bias={base['bias']:+.3f}  ({base['mae_vs_trivial']:.2f}x trivial)")
+        delta = record["baseline_mae_minus_cnn_mae"]
+        verdict = ("the CNN does NOT beat colour ridge regression -- report that "
+                   "plainly" if delta < 0.05
                    else "the CNN beats the colour baseline on this split")
-        print(f"    DELTA AUROC {delta:+.3f}  -> {verdict}")
+        print(f"    DELTA MAE {delta:+.3f} g/dL  -> {verdict}")
+        if not test_rep.beats_trivial:
+            print("    [!] the CNN does not beat predicting the training mean "
+                  "either. It has learned nothing about pallor.")
+    else:
+        print(f"    TEST  colour baseline "
+              f"AUROC={base['auroc']:.3f}  AUPRC={base['auprc']:.3f}  "
+              f"sens@spec={base['sens_at_spec']:.3f}  ECE={base['ece']:.3f}")
+        delta = record["cnn_minus_baseline_auroc"]
+        if delta is not None:
+            verdict = ("the CNN does NOT clearly beat colour logistic regression "
+                       "-- report that plainly" if delta < 0.03
+                       else "the CNN beats the colour baseline on this split")
+            print(f"    DELTA AUROC {delta:+.3f}  -> {verdict}")
     if test_rep.note:
         print(f"    [!] {test_rep.note}")
     print(f"    saved -> {out}")

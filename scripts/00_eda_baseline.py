@@ -165,11 +165,33 @@ def evaluate_split(df: pd.DataFrame, feats: pd.DataFrame, split: S.Split,
         print(f"    {name:<16} {rep.summary_line()}")
         if rep.note:
             print(f"    {'':<16} -> {rep.note}")
-    return {
+    out = {
         "split_kind": split.kind, "split_note": split.note,
         "split_hash": split.hash(),
         "baselines": {name: rep.as_dict() for name, rep in reports.items()},
     }
+
+    # The Hb-regression task, reported on the same split so the two views of the
+    # same data sit side by side. Hemoglobin is population-independent: the WHO
+    # cutoff is applied after the model, which is why this generalises to adult
+    # datasets that a binary model trained at 11 g/dL cannot serve.
+    if "hemoglobin" in df.columns:
+        hb_tr = df.loc[tr, "hemoglobin"].to_numpy(dtype=float)
+        hb_te = df.loc[te, "hemoglobin"].to_numpy(dtype=float)
+        preds = {
+            "mean_hb": B.mean_hb_predictions(hb_tr, len(hb_te)),
+            "colour_ridge": B.fit_colour_ridge(X_tr, hb_tr, X_te)[0],
+            "site_mean_hb": B.site_mean_hb(df, tr, te),
+        }
+        rregs = {n: M.regression_report(hb_te, p, y_train=hb_tr)
+                 for n, p in preds.items()}
+        print("    -- hemoglobin regression (g/dL) --")
+        for name, rep in rregs.items():
+            print(f"    {name:<16} {rep.summary_line()}")
+            if rep.note:
+                print(f"    {'':<16} -> {rep.note}")
+        out["regression"] = {n: r.as_dict() for n, r in rregs.items()}
+    return out
 
 
 def main() -> None:

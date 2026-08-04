@@ -1,0 +1,47 @@
+# Training config for the real CP-AnemiC data.
+#
+# Two choices differ from default.yaml and both are driven by the data itself:
+#
+# image_size: 128, not 224. CP-AnemiC images have a median size of 228x88 and
+#   48% of them have their longest side under 224 -- training at 224 would
+#   interpolate pixels that were never captured and cost 4x the compute for it.
+#   At 128 only 3% of images are upscaled. Measured on this machine (20 CPU
+#   cores, no GPU): ConvNeXt-Tiny is 16 min per run at 128 against 64 min at 224.
+#
+# batch_size: 16 on ~500 training images is 31 steps per epoch -- small enough
+#   to keep gradient noise useful as regularisation at this data scale.
+#
+# Known limitation: the transform resizes to a square, so a 228x88 conjunctiva
+# strip gets squashed. Colour features are unaffected by that distortion but a
+# CNN sees it; padding to square instead is the alternative if it matters.
+data_dir: data/cp-anemic
+metadata_csv: data/cp-anemic/metadata.csv
+image_size: 128
+roi_black_threshold: 20
+
+seed: 42
+val_frac: 0.15
+test_frac: 0.15
+
+backbone: convnext_tiny
+pretrained: true
+dropout: 0.3
+
+epochs: 30
+batch_size: 16
+lr: 0.0001
+weight_decay: 0.01
+early_stop_patience: 6
+warmup_epochs: 2
+num_workers: 0
+device: auto
+
+spec_target: 0.90
+n_calib_bins: 10
+
+task: regression
+target_col: hemoglobin
+
+out_dir: reports/runs_hb
+run_name: hb128
+baseline_dir: reports/baselines

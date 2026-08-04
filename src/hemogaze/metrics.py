@@ -241,26 +241,95 @@ class RegressionReport:
     bias: float                # mean(pred - true): systematic over/under estimate
     loa_low: float             # Bland-Altman 95% limits of agreement
     loa_high: float
+    mae_vs_trivial: float = float("nan")   # <1 beats predicting the train mean
+    note: str = ""
 
     def as_dict(self) -> dict:
         return asdict(self)
 
+    @property
+    def beats_trivial(self) -> bool:
+        return np.isfinite(self.mae_vs_trivial) and self.mae_vs_trivial < 0.98
 
-def regression_report(y_true, y_pred) -> RegressionReport:
+    def summary_line(self) -> str:
+        """MAE in g/dL is the headline because a clinician can read it; the
+        ratio to the trivial baseline is next to it so nobody mistakes a
+        respectable-looking error for a working model."""
+        ratio = ("" if not np.isfinite(self.mae_vs_trivial)
+                 else f"  ({self.mae_vs_trivial:.2f}x trivial"
+                      f"{'' if self.beats_trivial else ' -- NO BETTER'})")
+        return (f"n={self.n:<5d} MAE={self.mae:.2f} g/dL  RMSE={self.rmse:.2f}  "
+                f"bias={self.bias:+.2f}  LoA=[{self.loa_low:+.2f}, "
+                f"{self.loa_high:+.2f}]{ratio}")
+
+
+def trivial_mae(y_train, y_true) -> float:
+    """MAE of predicting the training mean for everyone -- the regression
+    equivalent of the majority-class baseline, and the number every model here
+    has to beat before it has demonstrated anything.
+
+    On CP-AnemiC this is 1.80 g/dL. A model reporting 1.75 has not learned to
+    read pallor; it has learned the average child.
+    """
+    y_train = np.asarray(y_train, dtype=float)
+    y_true = np.asarray(y_true, dtype=float)
+    return float(np.abs(y_true - y_train.mean()).mean())
+
+
+def regression_report(y_true, y_pred, y_train=None) -> RegressionReport:
     """For the Hb-regression variant. Bland-Altman (bias + limits of
     agreement) is the standard way to compare a new measurement against a
     reference in clinical work -- far more informative than R^2 alone.
+
+    Pass ``y_train`` to get ``mae_vs_trivial``: the ratio of this model's MAE to
+    the MAE of predicting the training mean. Below 1.0 the model beats the
+    trivial baseline; at or above 1.0 it does not, no matter how respectable the
+    absolute error looks in g/dL.
+
+    Regression is preferred over binary classification here for a reason worth
+    restating: hemoglobin is population-independent, so one model serves
+    children (WHO cutoff 11 g/dL) and adults (12 for women, 13 for men) by
+    thresholding afterwards. A binary model is married to the cutoff it was
+    trained on.
     """
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
+    if len(y_true) == 0:
+        raise ValueError("Empty evaluation set.")
     diff = y_pred - y_true
     bias = float(diff.mean())
     sd = float(diff.std(ddof=1)) if len(diff) > 1 else 0.0
+    mae = float(np.abs(diff).mean())
+
+    ratio, note = float("nan"), ""
+    if y_train is not None:
+        triv = trivial_mae(y_train, y_true)
+        ratio = mae / triv if triv > 0 else float("nan")
+        if np.isfinite(ratio) and ratio >= 0.98:
+            note = (f"MAE {mae:.2f} g/dL vs {triv:.2f} for predicting the "
+                    f"training mean -- this model has not learned to read "
+                    f"pallor. Report it as such.")
     return RegressionReport(
         n=int(len(y_true)),
-        mae=float(np.abs(diff).mean()),
+        mae=mae,
         rmse=float(np.sqrt((diff ** 2).mean())),
         bias=bias,
         loa_low=bias - 1.96 * sd,
         loa_high=bias + 1.96 * sd,
+        mae_vs_trivial=ratio,
+        note=note,
     )
+
+
+def classify_from_hb(hb_pred, cutoff) -> np.ndarray:
+    """Turn predicted hemoglobin into anemia scores at any WHO cutoff.
+
+    This is the whole argument for regressing Hb rather than classifying: the
+    threshold is applied *after* the model, so one set of predictions serves
+    children at 11 g/dL and adults at 12/13, and ``cutoff`` may be an array when
+    it varies per person (sex-specific adult thresholds).
+
+    Returns a score that increases with anemia risk, so it flows straight into
+    ``classification_report`` alongside every other model in this repo.
+    """
+    return np.asarray(cutoff, dtype=float) - np.asarray(hb_pred, dtype=float)
