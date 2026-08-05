@@ -1,0 +1,11 @@
+numpy>=1.24
+pandas>=2.0
+scikit-learn>=1.3
+pyyaml>=6.0
+# matplotlib removed: figures are a training-time artefact
+pillow>=10.0
+# openpyxl removed: only the CP-AnemiC adapter needs it, and that is a training-time concern
+timm>=1.0            # architecture definition, to load the trained weights into
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9   # multipart/form-data for the image upload

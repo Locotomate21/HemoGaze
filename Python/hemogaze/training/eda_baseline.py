@@ -29,13 +29,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "processing"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hemogaze import baselines as B
-from hemogaze import metrics as M
-from hemogaze import splits as S
-from hemogaze.config import Config, load_config
-from hemogaze.features import FEATURE_ORDER, color_features, roi_mask
+import baselines as B
+import metrics as M
+import splits as S
+from config import Config, load_config
+from features import FEATURE_ORDER, color_features, roi_mask
 
 
 def load_metadata(cfg: Config) -> pd.DataFrame:

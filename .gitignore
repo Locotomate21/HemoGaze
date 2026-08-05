@@ -1,12 +1,22 @@
-# Patient data: deny everything under data/, then allow back only the docs.
-# A whitelist rather than a list of known dataset folders, because the previous
-# version enumerated data/cp-anemic/ and data/synthetic/ by name -- so a new
-# dataset dropped into data/ was not covered until someone remembered to add it.
-data/*
-!data/README.md
+# Data and artefacts are DVC-managed and live on DagsHub, never in git.
+# Deny wholesale, then allow back only the pointers and documentation, so a new
+# dataset dropped in is covered without anyone remembering to add it.
+Datasets/*
+!Datasets/*.dvc
+!Datasets/README.md
+/reports
 
-# runs & artifacts
-reports/
+# Never commit credentials. DVC writes its own .dvc/.gitignore for config.local;
+# this is a second line of defence.
+.dvc/config.local
+*.env
+*.pem
+
+# Local environments, per project
+venv/
+.venv/
+
+# Binaries: everything of size belongs to DVC
 *.npz
 *.pt
 *.pth
@@ -15,7 +25,6 @@ reports/
 # python
 __pycache__/
 *.pyc
-.venv/
 .pytest_cache/
-.ipynb_checkpoints/
 .ruff_cache/
+.ipynb_checkpoints/

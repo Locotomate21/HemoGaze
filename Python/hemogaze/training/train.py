@@ -30,11 +30,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "processing"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hemogaze import metrics as M
-from hemogaze import splits as S
-from hemogaze.config import Config, load_config
+import metrics as M
+import splits as S
+from config import Config, load_config
 
 
 def slug(text: str) -> str:
@@ -102,8 +103,8 @@ def train_one(cfg: Config, df: pd.DataFrame, split: S.Split, baselines: dict,
     import torch.nn as nn
     from torch.utils.data import DataLoader
 
-    from hemogaze.dataset import make_dataset
-    from hemogaze.model import (build_model, freeze_backbone,
+    from dataset import make_dataset
+    from model import (build_model, freeze_backbone,
                                 trainable_parameter_count)
 
     seed_everything(cfg.seed)

@@ -46,12 +46,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "processing"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hemogaze import baselines as B
-from hemogaze import metrics as M
-from hemogaze.config import load_config
-from hemogaze.features import FEATURE_ORDER, color_features, roi_mask
+import baselines as B
+import metrics as M
+from config import load_config
+from features import FEATURE_ORDER, color_features, roi_mask
 
 
 def colour_features_for(df: pd.DataFrame, data_dir: Path, threshold: int,
@@ -81,8 +82,8 @@ def predict_cnn(run: Path, df: pd.DataFrame, data_dir: Path) -> np.ndarray:
     import torch
     from torch.utils.data import DataLoader
 
-    from hemogaze.dataset import make_dataset
-    from hemogaze.model import build_model, load_weights
+    from dataset import make_dataset
+    from model import build_model, load_weights
 
     cfg = load_config(run / "config.yaml")
     model = build_model(cfg.backbone, pretrained=False, dropout=cfg.dropout)

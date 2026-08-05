@@ -53,9 +53,9 @@ import numpy as np
 import pandas as pd
 from PIL import Image, ImageFile
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hemogaze import splits as S
+import splits as S
 
 COUNTRIES = ("India", "Italy")
 # WHO haemoglobin thresholds for non-pregnant adults, g/dL.

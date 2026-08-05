@@ -20,7 +20,7 @@ from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
 
-from .features import roi_bbox, roi_mask
+from features import roi_bbox, roi_mask
 
 # ImageNet statistics, since every backbone here is pretrained on it.
 IMAGENET_MEAN = [0.485, 0.456, 0.406]

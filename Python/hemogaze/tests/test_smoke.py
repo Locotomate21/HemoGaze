@@ -11,12 +11,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "processing"))
+sys.path.insert(0, str(ROOT / "training"))
 
-from hemogaze import baselines as B
-from hemogaze import metrics as M
-from hemogaze import splits as S
-from hemogaze.features import (FEATURE_ORDER, color_features,
+import baselines as B
+import metrics as M
+import splits as S
+from features import (FEATURE_ORDER, color_features,
                                features_to_vector, roi_bbox, roi_mask)
 
 
@@ -471,7 +473,7 @@ def test_site_prior_probe_collapses_on_an_unseen_site():
 
 torch_missing = False
 try:
-    from hemogaze.dataset import NEUTRAL_FILL, fill_background
+    from dataset import NEUTRAL_FILL, fill_background
 except ImportError:                      # no deep-learning stack installed
     torch_missing = True
 
@@ -522,7 +524,7 @@ def test_silhouette_keeps_shape_and_destroys_colour():
     If any colour survived, a null result could not be trusted."""
     from PIL import Image
 
-    from hemogaze.dataset import to_silhouette
+    from dataset import to_silhouette
     a = np.zeros((20, 30, 3), dtype="uint8")
     a[5:15, 5:25] = [180, 95, 95]
     s = np.asarray(to_silhouette(Image.fromarray(a)))

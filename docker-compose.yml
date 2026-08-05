@@ -1,0 +1,43 @@
+# Orchestration for the genIA_services monorepo.
+#
+# Two profiles rather than two files, because the difference between them is the
+# point of the repo layout:
+#
+#   docker compose --profile dev  up   -> builds Python/hemogaze/, runs the tests
+#   docker compose up                  -> runs container_images/hemogaze/, serving
+#
+# The production service never mounts training code and never builds from the
+# development Dockerfile.
+services:
+
+  hemogaze:
+    build:
+      context: ./Python/hemogaze
+      dockerfile: ../../container_images/hemogaze/Dockerfile
+    image: hemogaze-server:1.0.0
+    ports:
+      - "8000:8000"
+    volumes:
+      # Weights live in DVC/DagsHub, not in the image. `dvc pull reports` first,
+      # then this mounts them read-only -- so shipping a retrained model is a
+      # restart, not a rebuild.
+      - ./reports/runs_hb/hb128_patient_level/model.pt:/app/server/model.pt:ro
+      - ./reports/runs_hb/hb128_patient_level/config.yaml:/app/server/config.yaml:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+
+  hemogaze-dev:
+    profiles: ["dev"]
+    build:
+      context: ./Python/hemogaze
+      dockerfile: Dockerfile
+    image: hemogaze-dev:1.0.0
+    volumes:
+      # Source mounted so a test run reflects the working tree, not the build.
+      - ./Python/hemogaze:/app
+      # Datasets are DVC-managed; mount read-only so a container cannot corrupt
+      # data whose only other copy is on DagsHub.
+      - ./Datasets:/app/Datasets:ro
+      - ./reports:/app/reports
+    command: ["python", "-m", "pytest", "tests", "-q"]

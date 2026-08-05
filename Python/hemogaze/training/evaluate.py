@@ -28,10 +28,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "processing"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hemogaze import metrics as M
-from hemogaze.config import load_config
+import metrics as M
+from config import load_config
 
 
 def _plt():
@@ -95,8 +96,8 @@ def gradcam_grid(run: Path, meta: dict, n_images: int = 8) -> None:
         return
     try:
         import torch
-        from hemogaze.dataset import IMAGENET_MEAN, IMAGENET_STD, make_dataset
-        from hemogaze.model import build_model, gradcam_target_layer, load_weights
+        from dataset import IMAGENET_MEAN, IMAGENET_STD, make_dataset
+        from model import build_model, gradcam_target_layer, load_weights
     except ImportError as exc:
         print(f"    skipping Grad-CAM (torch stack unavailable: {exc})")
         return
@@ -104,7 +105,7 @@ def gradcam_grid(run: Path, meta: dict, n_images: int = 8) -> None:
     cfg = load_config(run / "config.yaml")
     df = pd.read_csv(cfg.metadata_csv)
     # Show the test images of this run: the ones the model never trained on.
-    from hemogaze import splits as S
+    import splits as S
     split = (S.leave_one_site_out(df, meta["test_site"], cfg.val_frac, cfg.seed)
              if meta.get("test_site") else
              S.patient_level_split(df, cfg.val_frac, cfg.test_frac, cfg.seed))

@@ -37,28 +37,33 @@ metrics, cross-site validation, and no overselling.
 
 ## Layout
 
-- `src/hemogaze/` — importable modules (`splits`, `metrics`, `features`,
-  `baselines`, `dataset`, `model`, `config`). Everything except `dataset` and
-  `model` has **no torch dependency** and is covered by `tests/test_smoke.py`;
-  those two are the torch boundary and are never imported by `__init__`.
-- `scripts/` — `01_prepare_metadata.py` → `00_eda_baseline.py` → `02_train.py`
-  → `03_evaluate.py`. Step 01 is the CP-AnemiC adapter (xlsx + `Anemic/` +
-  `Non-anemic/` → the four required columns) and only needs running once, which
-  is why step 00 keeps the lower number: it is the one you re-read constantly.
-  `make_synthetic_data.py` is unnumbered because it is plumbing, not pipeline:
-  it fabricates a stand-in dataset so the whole chain can be run without
-  patient images.
-- `config/default.yaml` — all hyperparameters. `config/synthetic.yaml` is the
-  CPU smoke-run counterpart.
-- `reports/baselines*/` — step-0 output; `02_train.py` **refuses to run**
-  without it. `reports/runs*/` — per-run config, weights, metrics, figures.
+The repo is the `genIA_services` monorepo; this project lives in
+`Python/hemogaze/` and **all commands run from that directory**.
+
+- `processing/` — domain logic with **no torch dependency**: `features`
+  (ROI masking, colour statistics), `splits`, `metrics`, `baselines`, `config`,
+  plus the dataset adapters `prepare_cpanemic.py` and `prepare_external.py`.
+- `training/` — the torch boundary and the pipelines: `dataset`, `model`,
+  `eda_baseline` → `train` → `evaluate`, `external_validation`,
+  `make_synthetic_data` (plumbing: a stand-in dataset so the chain runs with no
+  patient images), and `configs/*.yaml`.
+- `server/` — FastAPI service. Returns g/dL, never a label, and carries
+  `valid_for_screening: false` plus the evidence in every response.
+- `examples/` — CLI and web clients; they depend on nothing in `training/`.
+- `reports/` and `Datasets/` — **DVC-managed, on DagsHub.** Only the ~150-byte
+  `.dvc` pointers are in git. `reports/baselines*/` is step-0 output and
+  `train.py` **refuses to run** without it.
 - `.claude/agents/` — specialist subagents; see below.
+
+Imports are flat (`from features import roi_mask`) because `WORKDIR` is the
+project root in both Dockerfiles; the scripts add `processing/` and `training/`
+to `sys.path` for local runs.
 
 ## Conventions
 
 - Python, functional and explicit; type hints; docstrings that say *why*.
 - `pytest -q` must stay green. New data/split/metric logic needs a test.
-- Run `python scripts/00_eda_baseline.py` and read its confounder audit before
+- Run `python training/eda_baseline.py` and read its confounder audit before
   training anything.
 - Any artifact produced from the synthetic stand-in is stamped `SYNTHETIC`
   (`Config.is_synthetic()`). Never quote a synthetic number as a result.

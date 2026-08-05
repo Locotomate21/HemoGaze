@@ -54,9 +54,9 @@ from pathlib import Path
 
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hemogaze import splits as S
+import splits as S
 
 SHEET = "Anemia_Data_Collection_Sheet.xlsx"
 FOLDERS = {"Anemic": 1, "Non-anemic": 0}

@@ -1,0 +1,6 @@
+outs:
+- md5: f48f3cab4dd8de8b308c3618bfc3a621.dir
+  size: 13237292
+  nfiles: 722
+  hash: md5
+  path: hemogaze_sintetico_v1.0.0_prueba_pipeline_20260804

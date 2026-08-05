@@ -1,0 +1,144 @@
+<!doctype html>
+<!--
+  Single-file web client for the HemoGaze server. No build step, no dependencies:
+  open it in a browser, or serve it from anywhere and point it at the API.
+
+  The layout puts the not-for-clinical-use warning above the number rather than
+  below it. A screening interface that shows a confident-looking figure first and
+  the caveat afterwards teaches the user to read the figure and skip the caveat.
+-->
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HemoGaze — estimador de hemoglobina</title>
+  <style>
+    :root { color-scheme: light dark; --fg:#1a1a1a; --bg:#fff; --muted:#666;
+            --line:#ddd; --warn-bg:#fff4e5; --warn-fg:#7a4a00; --warn-line:#f0b357; }
+    @media (prefers-color-scheme: dark) {
+      :root { --fg:#e8e8e8; --bg:#141414; --muted:#9a9a9a; --line:#333;
+              --warn-bg:#2b1f0a; --warn-fg:#f0c078; --warn-line:#7a5a1a; }
+    }
+    body { font:16px/1.55 system-ui,-apple-system,sans-serif; color:var(--fg);
+           background:var(--bg); max-width:44rem; margin:0 auto; padding:2rem 1.25rem; }
+    h1 { font-size:1.4rem; margin:0 0 .25rem; }
+    .sub { color:var(--muted); margin:0 0 1.5rem; }
+    .warn { background:var(--warn-bg); color:var(--warn-fg);
+            border:1px solid var(--warn-line); border-left-width:4px;
+            border-radius:6px; padding:.85rem 1rem; margin:0 0 1.5rem; font-size:.92rem; }
+    fieldset { border:1px solid var(--line); border-radius:8px; padding:1rem; }
+    legend { padding:0 .4rem; color:var(--muted); font-size:.85rem; }
+    label { display:block; margin:.6rem 0 .2rem; font-size:.9rem; }
+    input, select, button { font:inherit; padding:.5rem; border-radius:6px;
+            border:1px solid var(--line); background:var(--bg); color:var(--fg); }
+    button { cursor:pointer; font-weight:600; margin-top:1rem; }
+    button:disabled { opacity:.55; cursor:progress; }
+    #out { margin-top:1.5rem; }
+    .val { font-size:2.2rem; font-weight:700; font-variant-numeric:tabular-nums; }
+    .unit { font-size:1rem; font-weight:400; color:var(--muted); }
+    table { border-collapse:collapse; width:100%; margin-top:1rem; font-size:.9rem; }
+    th,td { text-align:left; padding:.4rem .5rem; border-bottom:1px solid var(--line); }
+    th { color:var(--muted); font-weight:500; }
+    .err { color:#c0392b; }
+    img#preview { max-width:100%; border-radius:6px; margin-top:.75rem; display:none; }
+  </style>
+</head>
+<body>
+  <h1>Estimador de hemoglobina</h1>
+  <p class="sub">Cliente de ejemplo para el servicio HemoGaze.</p>
+
+  <div class="warn" id="warn">
+    <strong>No apto para uso clínico.</strong> Este modelo mejora un 7 % sobre
+    predecir el promedio de la población, y en adultos fuera de su población de
+    entrenamiento su error se correlaciona <em>negativamente</em> con la
+    hemoglobina real: ordena como anémicos a los sanos. La referencia sigue
+    siendo el laboratorio.
+  </div>
+
+  <form id="f">
+    <fieldset>
+      <legend>entrada</legend>
+      <label for="api">Servidor</label>
+      <input id="api" value="http://localhost:8000" size="34">
+
+      <label for="img">Recorte de conjuntiva palpebral</label>
+      <input id="img" type="file" accept="image/*" required>
+
+      <label for="cut">Umbral OMS a comparar</label>
+      <select id="cut">
+        <option value="">sin umbral — solo estimar g/dL</option>
+        <option value="11">11 — niños 6–59 meses</option>
+        <option value="12">12 — mujeres adultas</option>
+        <option value="13">13 — hombres adultos</option>
+      </select>
+
+      <img id="preview" alt="">
+      <button id="go">Estimar</button>
+    </fieldset>
+  </form>
+
+  <div id="out"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+$("img").addEventListener("change", e => {
+  const f = e.target.files[0];
+  const p = $("preview");
+  if (!f) { p.style.display = "none"; return; }
+  p.src = URL.createObjectURL(f);
+  p.style.display = "block";
+});
+
+$("f").addEventListener("submit", async e => {
+  e.preventDefault();
+  const file = $("img").files[0];
+  if (!file) return;
+
+  const btn = $("go"), out = $("out");
+  btn.disabled = true; out.innerHTML = "<p class='sub'>consultando…</p>";
+
+  const cut = $("cut").value;
+  const url = $("api").value.replace(/\/$/, "") + "/predict"
+            + (cut ? "?cutoff_g_dl=" + cut : "");
+  const body = new FormData();
+  body.append("image", file, file.name);
+
+  try {
+    const r = await fetch(url, { method: "POST", body });
+    const d = await r.json();
+    if (!r.ok) {
+      // 503 means the service is up but has no weights: say which it is.
+      out.innerHTML = `<p class="err">HTTP ${r.status}: ${d.detail ?? "error"}</p>`;
+      return;
+    }
+    // The number never appears without its caveat, so the warning is re-rendered
+    // from whatever the server sent rather than trusted from the static markup.
+    $("warn").innerHTML = "<strong>No apto para uso clínico.</strong> " + d.warning;
+
+    let rows = `<tr><th>conjuntiva en el encuadre</th><td>${(d.roi_fraction*100).toFixed(1)} %</td></tr>`;
+    if (d.below_cutoff !== null && d.below_cutoff !== undefined) {
+      rows += `<tr><th>frente al umbral ${d.cutoff_g_dl} g/dL</th><td>${
+        d.below_cutoff ? "por debajo" : "en o por encima"}</td></tr>`;
+    }
+    rows += `<tr><th>válido para tamizaje</th><td>${d.valid_for_screening ? "sí" : "no"}</td></tr>`;
+    rows += `<tr><th>MAE medido</th><td>${d.evidence.mae_g_dl} g/dL (predecir la media: ${
+      d.evidence.mae_predicting_the_training_mean_g_dl})</td></tr>`;
+    rows += `<tr><th>población de entrenamiento</th><td>${d.evidence.training_population}</td></tr>`;
+
+    const low = d.roi_fraction < 0.05
+      ? `<p class="err">Apenas se detecta conjuntiva. ¿Es el recorte correcto?</p>` : "";
+
+    out.innerHTML = `<p class="val">${d.hemoglobin_g_dl.toFixed(2)}
+        <span class="unit">g/dL estimados</span></p>${low}<table>${rows}</table>`;
+  } catch (err) {
+    out.innerHTML = `<p class="err">No se pudo contactar el servidor: ${err.message}.
+      Si abriste este archivo con file://, el navegador puede bloquear la petición
+      por CORS; sírvelo por HTTP o usa examples/cli_client.py.</p>`;
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
